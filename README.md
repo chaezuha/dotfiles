@@ -1,15 +1,27 @@
 # My dotfiles
-Some of my configs, managed with stow
 
-## General Structure
-The top-level folders are stow packages that will get mirrored into Home
-  e.g: gitconfig/.gitconfig -> ~./gitconfig
+Some of my configs, managed with [GNU Stow](https://www.gnu.org/software/stow/).
 
-## Setup 
-  Install stow
-  git clone this repo to the desired folder
-  `stow foldername` for each desired package
+## General structure
+
+The top-level folders are Stow packages that get mirrored into `$HOME`.
+
+For example: `gitconfig/.gitconfig` → `~/.gitconfig`
+
+## Setup
+
+1. Install Stow
+2. Clone this repo to the desired folder:
+```sh
+   git clone <repo-url> ~/dotfiles
+   cd ~/dotfiles
+```
+3. Run `stow <foldername>` for each desired package
 
 ## Notes
-  To remove a package's links:
-  `stow -D foldername`
+
+To remove a package's symlinks:
+
+```sh
+stow -D <foldername>
+```
