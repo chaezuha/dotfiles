@@ -1,0 +1,10 @@
+[user]
+	name = Harley
+	email = 143757576+chaezuha@users.noreply.github.com
+	signingkey = ~/.ssh/id_ed25519.pub
+[credential]
+	helper = cache
+[gpg]
+	format = ssh
+[commit]
+	gpgsign = true
