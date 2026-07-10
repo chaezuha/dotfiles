@@ -93,27 +93,32 @@ setup_git_credential_helper() {
 }
 
 stow_packages() {
-    # Stow refuses to overwrite real files; move any conflicting regular file
-    # (e.g. an existing hand-written ~/.gitconfig) out of the way first.
-    # A path that resolves into this repo is already stowed (possibly via a
-    # symlinked parent directory) and must be left alone — backing it up
-    # would rename the repo's own files.
-    local repo_dir pkg file target
-    repo_dir="$(pwd -P)"
+    info "Stowing: ${STOW_PACKAGES[*]}"
+
+    # No conflicts on an already-set-up machine: stow succeeds and we're done.
+    if stow --restow "${STOW_PACKAGES[@]}" 2>/dev/null; then
+        return
+    fi
+
+    # Stow refused because something real sits where a symlink belongs.
+    # Back up a conflicting file only when it is provably foreign: a regular
+    # file, not the same inode as the repo's copy, and living at its literal
+    # physical path (never reached through a symlinked parent — that could
+    # be this repo's own files). Anything ambiguous is left for stow to
+    # report as a conflict rather than moved.
+    local pkg file target
     for pkg in "${STOW_PACKAGES[@]}"; do
         while IFS= read -r file; do
             target="$HOME/${file#"$pkg"/}"
-            if [ -f "$target" ] && [ ! -L "$target" ]; then
-                case "$(realpath "$target")" in
-                    "$repo_dir"/*) continue ;;
-                esac
+            if [ -f "$target" ] && [ ! -L "$target" ] &&
+               ! [ "$target" -ef "$file" ] &&
+               [ "$(realpath "$target")" = "$target" ]; then
                 warn "Backing up existing $target to $target.bak"
                 mv "$target" "$target.bak"
             fi
         done < <(cd "$pkg" && find . -type f | sed "s|^\./|$pkg/|")
     done
 
-    info "Stowing: ${STOW_PACKAGES[*]}"
     stow --restow "${STOW_PACKAGES[@]}"
 }
 
