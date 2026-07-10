@@ -3,8 +3,22 @@
 	email = 143757576+chaezuha@users.noreply.github.com
 	signingkey = ~/.ssh/id_ed25519.pub
 [credential]
-	helper = cache
+	helper = osxkeychain
 [gpg]
 	format = ssh
 [commit]
 	gpgsign = true
+[init]
+	defaultBranch = main
+[push]
+	autoSetupRemote = true
+[fetch]
+	prune = true
+[pull]
+	rebase = true
+[rebase]
+	autostash = true
+[merge]
+	conflictstyle = zdiff3
+[diff]
+	colorMoved = default
