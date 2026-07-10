@@ -19,7 +19,7 @@ install_macos() {
 
     info "Installing packages with Homebrew"
     local pkg
-    for pkg in git stow neovim node ripgrep fd; do
+    for pkg in git stow neovim node ripgrep fd tree-sitter-cli gh; do
         brew list "$pkg" >/dev/null 2>&1 || brew install "$pkg"
     done
     brew list --cask ghostty >/dev/null 2>&1 || brew install --cask ghostty
@@ -29,7 +29,22 @@ install_macos() {
 
 install_fedora() {
     info "Installing packages with dnf"
-    sudo dnf install -y git stow neovim nodejs ripgrep fd-find python3 gcc unzip curl
+    sudo dnf install -y git stow neovim nodejs ripgrep fd-find python3 gcc unzip curl \
+        tree-sitter-cli gh
+}
+
+# tree-sitter-cli only exists in apt on the newest Debian/Ubuntu releases;
+# fall back to npm (already installed on the apt platforms) elsewhere.
+install_treesitter_cli() {
+    if command -v tree-sitter >/dev/null 2>&1; then
+        return
+    fi
+    if apt-cache show tree-sitter-cli >/dev/null 2>&1; then
+        sudo apt-get install -y tree-sitter-cli
+    else
+        info "tree-sitter-cli not in apt; installing via npm"
+        sudo npm install -g tree-sitter-cli
+    fi
 }
 
 install_ubuntu() {
@@ -38,14 +53,16 @@ install_ubuntu() {
     sudo apt-get install -y software-properties-common
     sudo add-apt-repository -y ppa:neovim-ppa/unstable
     sudo apt-get install -y git stow neovim nodejs npm ripgrep fd-find \
-        python3 python3-venv build-essential unzip curl
+        python3 python3-venv build-essential unzip curl gh
+    install_treesitter_cli
 }
 
 install_debian() {
     info "Installing packages with apt"
     sudo apt-get update
     sudo apt-get install -y git stow neovim nodejs npm ripgrep fd-find \
-        python3 python3-venv build-essential unzip curl
+        python3 python3-venv build-essential unzip curl gh
+    install_treesitter_cli
     if ! nvim --headless -c 'if has("nvim-0.10") | q | else | cq | endif' >/dev/null 2>&1; then
         warn "Installed Neovim is older than 0.10; the LazyVim config may not work." \
              "Consider installing a newer release from https://github.com/neovim/neovim/releases"
@@ -54,7 +71,8 @@ install_debian() {
 
 install_arch() {
     info "Installing packages with pacman"
-    sudo pacman -S --needed --noconfirm git stow neovim nodejs npm ripgrep fd python gcc unzip curl
+    sudo pacman -S --needed --noconfirm git stow neovim nodejs npm ripgrep fd python gcc unzip curl \
+        tree-sitter-cli github-cli
 }
 
 install_linux() {
@@ -67,7 +85,7 @@ install_linux() {
         ubuntu*)           install_ubuntu ;;
         *debian*)          install_debian ;;
         *arch*)            install_arch ;;
-        *) die "Unsupported distribution '${ID:-unknown}'. Install git, stow, neovim, node, ripgrep, fd, python3, and a C compiler manually, then run: stow ${STOW_PACKAGES[*]}" ;;
+        *) die "Unsupported distribution '${ID:-unknown}'. Install git, stow, neovim, node, ripgrep, fd, tree-sitter, gh, python3, and a C compiler manually, then run: stow ${STOW_PACKAGES[*]}" ;;
     esac
 }
 
