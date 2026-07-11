@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 OS="$(uname -s)"
-STOW_PACKAGES=(gitconfig gitignore nvim shell)
+STOW_PACKAGES=(gitconfig gitignore nvim shell starship)
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -20,7 +20,8 @@ install_macos() {
     info "Installing packages with Homebrew"
     local pkg
     for pkg in git stow neovim node ripgrep fd tree-sitter-cli gh \
-               fzf zoxide git-delta zsh-autosuggestions zsh-syntax-highlighting; do
+               fzf zoxide git-delta starship \
+               zsh-autosuggestions zsh-syntax-highlighting; do
         brew list "$pkg" >/dev/null 2>&1 || brew install "$pkg"
     done
     for pkg in ghostty font-jetbrains-mono-nerd-font; do
@@ -35,6 +36,8 @@ install_fedora() {
     sudo dnf install -y git stow neovim nodejs ripgrep fd-find python3 gcc unzip curl \
         tree-sitter-cli gh fzf zoxide git-delta \
         zsh zsh-autosuggestions zsh-syntax-highlighting
+    # Separate: in the Fedora repos, but not in RHEL/EPEL.
+    sudo dnf install -y starship 2>/dev/null || install_starship_fallback
 }
 
 # Some packages (e.g. git-delta) only exist in apt on newer Debian/Ubuntu
@@ -52,6 +55,18 @@ install_apt_optional() {
     done
 }
 
+# starship is in the Fedora and Arch repos but not in RHEL/EPEL and only in
+# the newest Debian/Ubuntu releases; fall back to the official installer,
+# which drops a single binary into ~/.local/bin (already first on PATH).
+install_starship_fallback() {
+    if command -v starship >/dev/null 2>&1; then
+        return
+    fi
+    info "starship not available from the package manager; using the official installer"
+    curl -sS https://starship.rs/install.sh | sh -s -- -y -b "$HOME/.local/bin" ||
+        warn "starship install failed; the shell config falls back to a plain prompt."
+}
+
 # tree-sitter-cli only exists in apt on the newest Debian/Ubuntu releases;
 # fall back to npm (already installed on the apt platforms) elsewhere.
 install_treesitter_cli() {
@@ -66,6 +81,14 @@ install_treesitter_cli() {
     fi
 }
 
+install_starship_apt() {
+    if apt-cache show starship >/dev/null 2>&1; then
+        sudo apt-get install -y starship
+    else
+        install_starship_fallback
+    fi
+}
+
 install_ubuntu() {
     info "Installing packages with apt (Neovim from ppa:neovim-ppa/unstable)"
     sudo apt-get update
@@ -76,6 +99,7 @@ install_ubuntu() {
         zsh zsh-autosuggestions zsh-syntax-highlighting
     install_apt_optional git-delta
     install_treesitter_cli
+    install_starship_apt
 }
 
 install_debian() {
@@ -86,6 +110,7 @@ install_debian() {
         zsh zsh-autosuggestions zsh-syntax-highlighting
     install_apt_optional git-delta
     install_treesitter_cli
+    install_starship_apt
     if ! nvim --headless -c 'if has("nvim-0.10") | q | else | cq | endif' >/dev/null 2>&1; then
         warn "Installed Neovim is older than 0.10; the LazyVim config may not work." \
              "Consider installing a newer release from https://github.com/neovim/neovim/releases"
@@ -95,7 +120,7 @@ install_debian() {
 install_arch() {
     info "Installing packages with pacman"
     sudo pacman -S --needed --noconfirm git stow neovim nodejs npm ripgrep fd python gcc unzip curl \
-        tree-sitter-cli github-cli fzf zoxide git-delta \
+        tree-sitter-cli github-cli fzf zoxide git-delta starship \
         zsh zsh-autosuggestions zsh-syntax-highlighting
 }
 
@@ -109,7 +134,7 @@ install_linux() {
         ubuntu*)           install_ubuntu ;;
         *debian*)          install_debian ;;
         *arch*)            install_arch ;;
-        *) die "Unsupported distribution '${ID:-unknown}'. Install git, stow, neovim, node, ripgrep, fd, tree-sitter, gh, python3, zsh (plus zsh-autosuggestions and zsh-syntax-highlighting), and a C compiler manually, then run: stow ${STOW_PACKAGES[*]}" ;;
+        *) die "Unsupported distribution '${ID:-unknown}'. Install git, stow, neovim, node, ripgrep, fd, tree-sitter, gh, python3, starship, zsh (plus zsh-autosuggestions and zsh-syntax-highlighting), and a C compiler manually, then run: stow ${STOW_PACKAGES[*]}" ;;
     esac
 }
 
@@ -222,19 +247,6 @@ stow_packages() {
     stow --restow "${STOW_PACKAGES[@]}"
 }
 
-# Bash is no longer managed by these dotfiles; put back the distro's stock
-# files where the old symlinks were removed (restow prunes them). No-op on
-# macOS, which has no /etc/skel.
-restore_bash_defaults() {
-    local f
-    for f in .bashrc .bash_profile .profile; do
-        if [ ! -e "$HOME/$f" ] && [ -f "/etc/skel/$f" ]; then
-            info "Restoring default $f from /etc/skel"
-            cp "/etc/skel/$f" "$HOME/$f"
-        fi
-    done
-}
-
 # Anything personal in a backed-up shell rc should be easy to recover: copy
 # it into the corresponding .local file, fully commented out, for the user to
 # review. Never overwrites an existing .local file.
@@ -263,7 +275,6 @@ esac
 
 setup_git_credential_helper
 stow_packages
-restore_bash_defaults
 seed_local_from_backup "$HOME/.zshrc.bak" "$HOME/.zshrc.local"
 
 info "Done."

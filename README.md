@@ -18,7 +18,7 @@ cd ~/dotfiles
 ./install.sh
 ```
 
-The script installs the needed packages (git, stow, neovim, zsh, fzf, zoxide, git-delta, …) with the platform's package manager, installs the JetBrainsMono Nerd Font, then stows the packages. Supported platforms:
+The script installs the needed packages (git, stow, neovim, zsh, fzf, zoxide, git-delta, starship, …) with the platform's package manager, installs the JetBrainsMono Nerd Font, then stows the packages. Where starship isn't packaged (RHEL, older Debian/Ubuntu), it falls back to the [official installer](https://starship.rs/guide/) into `~/.local/bin`. Supported platforms:
 
 - **macOS** (Homebrew, must already be installed) — also installs Ghostty
 - **Fedora** / RHEL-family (dnf)
@@ -41,7 +41,8 @@ Any existing config file that would conflict with a symlink is backed up to `<fi
 - **`gitconfig`** — shared `~/.gitconfig` (delta as pager, nvim as editor)
 - **`gitignore`** — global git ignore at `~/.config/git/ignore` (OS/editor junk)
 - **`nvim`** — LazyVim-based Neovim config
-- **`shell`** — `~/.zshrc` plus the shared POSIX pieces (`env.sh`, `aliases.sh`) in `~/.config/shell/`. Bash is intentionally unmanaged — it stays the distro default (on Linux the install script restores the `/etc/skel` files where the old symlinks were)
+- **`starship`** — [starship](https://starship.rs) prompt config at `~/.config/starship.toml` (gruvbox-rainbow preset). The zsh config only inits starship when the binary exists, falling back to a plain prompt
+- **`shell`** — `~/.zshrc` plus the shared POSIX pieces (`env.sh`, `aliases.sh`) in `~/.config/shell/`. Bash is intentionally unmanaged — it stays the distro default
 - **`ghostty`** — Ghostty terminal config (macOS only)
 
 ## Machine-specific overrides

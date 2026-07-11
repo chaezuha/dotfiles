@@ -21,8 +21,12 @@ zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' menu select
 
 # --- Prompt ---
-# Apple's /etc/zshrc default, set explicitly so Linux looks the same.
-PROMPT='%n@%m %1~ %% '
+if command -v starship >/dev/null 2>&1; then
+    eval "$(starship init zsh)"
+else
+    # Apple's /etc/zshrc default, so machines without starship still match.
+    PROMPT='%n@%m %1~ %% '
+fi
 
 # --- Plugins ---
 # Sourced only if installed (brew on macOS, distro packages on Linux).
