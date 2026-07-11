@@ -18,7 +18,7 @@ cd ~/dotfiles
 ./install.sh
 ```
 
-The script installs the needed packages (git, stow, neovim, fzf, zoxide, git-delta, …) with the platform's package manager, installs the JetBrainsMono Nerd Font, then stows the packages. Supported platforms:
+The script installs the needed packages (git, stow, neovim, zsh, fzf, zoxide, git-delta, …) with the platform's package manager, installs the JetBrainsMono Nerd Font, then stows the packages. Supported platforms:
 
 - **macOS** (Homebrew, must already be installed) — also installs Ghostty
 - **Fedora** / RHEL-family (dnf)
@@ -26,7 +26,7 @@ The script installs the needed packages (git, stow, neovim, fzf, zoxide, git-del
 - **Debian** (apt)
 - **Arch** (pacman)
 
-Ghostty is only installed (and its config only stowed) on macOS. On Linux, the font is installed to `~/.local/share/fonts` and, if [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) is present, its font is set via gsettings. The zsh plugins (`zsh-autosuggestions`, `zsh-syntax-highlighting`) are installed via Homebrew on macOS; on Linux the `.zshrc` picks them up automatically if the distro packages are installed.
+Ghostty is only installed (and its config only stowed) on macOS. On Linux, the font is installed to `~/.local/share/fonts` and, if [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) is present, its font is set via gsettings. Zsh is the shell everywhere: the plugins (`zsh-autosuggestions`, `zsh-syntax-highlighting`) come from Homebrew on macOS and from the distro packages on Linux, where the script also installs zsh itself and switches the login shell to it (`sudo chsh`).
 
 Any existing config file that would conflict with a symlink is backed up to `<file>.bak`. The script is safe to re-run.
 

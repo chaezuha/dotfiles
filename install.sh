@@ -33,7 +33,8 @@ install_macos() {
 install_fedora() {
     info "Installing packages with dnf"
     sudo dnf install -y git stow neovim nodejs ripgrep fd-find python3 gcc unzip curl \
-        tree-sitter-cli gh fzf zoxide git-delta
+        tree-sitter-cli gh fzf zoxide git-delta \
+        zsh zsh-autosuggestions zsh-syntax-highlighting
 }
 
 # Some packages (e.g. git-delta) only exist in apt on newer Debian/Ubuntu
@@ -71,7 +72,8 @@ install_ubuntu() {
     sudo apt-get install -y software-properties-common
     sudo add-apt-repository -y ppa:neovim-ppa/unstable
     sudo apt-get install -y git stow neovim nodejs npm ripgrep fd-find \
-        python3 python3-venv build-essential unzip curl gh fzf zoxide
+        python3 python3-venv build-essential unzip curl gh fzf zoxide \
+        zsh zsh-autosuggestions zsh-syntax-highlighting
     install_apt_optional git-delta
     install_treesitter_cli
 }
@@ -80,7 +82,8 @@ install_debian() {
     info "Installing packages with apt"
     sudo apt-get update
     sudo apt-get install -y git stow neovim nodejs npm ripgrep fd-find \
-        python3 python3-venv build-essential unzip curl gh fzf zoxide
+        python3 python3-venv build-essential unzip curl gh fzf zoxide \
+        zsh zsh-autosuggestions zsh-syntax-highlighting
     install_apt_optional git-delta
     install_treesitter_cli
     if ! nvim --headless -c 'if has("nvim-0.10") | q | else | cq | endif' >/dev/null 2>&1; then
@@ -92,7 +95,8 @@ install_debian() {
 install_arch() {
     info "Installing packages with pacman"
     sudo pacman -S --needed --noconfirm git stow neovim nodejs npm ripgrep fd python gcc unzip curl \
-        tree-sitter-cli github-cli fzf zoxide git-delta
+        tree-sitter-cli github-cli fzf zoxide git-delta \
+        zsh zsh-autosuggestions zsh-syntax-highlighting
 }
 
 install_linux() {
@@ -105,7 +109,7 @@ install_linux() {
         ubuntu*)           install_ubuntu ;;
         *debian*)          install_debian ;;
         *arch*)            install_arch ;;
-        *) die "Unsupported distribution '${ID:-unknown}'. Install git, stow, neovim, node, ripgrep, fd, tree-sitter, gh, python3, and a C compiler manually, then run: stow ${STOW_PACKAGES[*]}" ;;
+        *) die "Unsupported distribution '${ID:-unknown}'. Install git, stow, neovim, node, ripgrep, fd, tree-sitter, gh, python3, zsh (plus zsh-autosuggestions and zsh-syntax-highlighting), and a C compiler manually, then run: stow ${STOW_PACKAGES[*]}" ;;
     esac
 }
 
@@ -143,6 +147,26 @@ configure_ptyxis() {
     info "Setting Ptyxis font to JetBrainsMono Nerd Font 13"
     gsettings set org.gnome.Ptyxis use-system-font false
     gsettings set org.gnome.Ptyxis font-name 'JetBrainsMono Nerd Font 13'
+}
+
+# Make zsh the login shell on Linux, matching macOS (where it is the default).
+# sudo chsh avoids the password prompt (sudo is already primed from the
+# package install) and behaves the same on every supported distro.
+set_default_shell_zsh() {
+    local zsh current
+    zsh="$(command -v zsh)" || { warn "zsh not found; leaving login shell unchanged."; return 0; }
+
+    current="$(getent passwd "$USER" | cut -d: -f7)" || current=""
+    [ "$current" = "$zsh" ] && return 0
+
+    grep -qx "$zsh" /etc/shells 2>/dev/null ||
+        warn "$zsh is not listed in /etc/shells; chsh may refuse it."
+
+    info "Changing login shell to $zsh (was ${current:-unknown})"
+    if ! sudo chsh -s "$zsh" "$USER"; then
+        warn "Could not change the login shell (directory account?)." \
+             "Run manually: sudo usermod -s $zsh $USER"
+    fi
 }
 
 # Platform-specific git settings live in ~/.gitconfig.local (included from
@@ -219,7 +243,8 @@ case "$OS" in
     Darwin) install_macos ;;
     Linux)  install_linux
             install_nerd_font_linux
-            configure_ptyxis ;;
+            configure_ptyxis
+            set_default_shell_zsh ;;
     *)      die "Unsupported OS: $OS" ;;
 esac
 
