@@ -59,8 +59,12 @@ command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
 if command -v fzf >/dev/null 2>&1; then
     if fzf --zsh >/dev/null 2>&1; then
         source <(fzf --zsh)
+    elif [ -f /usr/share/fzf/shell/key-bindings.zsh ]; then
+        # Older fzf packages predate `fzf --zsh`; Fedora/RHEL keep the
+        # bindings here...
+        . /usr/share/fzf/shell/key-bindings.zsh
     elif [ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]; then
-        # Older fzf packages (Debian/Ubuntu) predate `fzf --zsh`.
+        # ...and Debian/Ubuntu here.
         . /usr/share/doc/fzf/examples/key-bindings.zsh
     fi
 fi

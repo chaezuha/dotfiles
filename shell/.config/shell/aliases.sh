@@ -20,7 +20,11 @@ fi
 alias ll='ls -lh'
 alias la='ls -lha'
 
-# Debian/Ubuntu package bat's binary as batcat.
+# Debian/Ubuntu package bat's binary as batcat, and fd's as fdfind.
+# (install.sh also symlinks fdfind to ~/.local/bin/fd for non-shell tools.)
 if ! command -v bat >/dev/null 2>&1 && command -v batcat >/dev/null 2>&1; then
     alias bat='batcat'
+fi
+if ! command -v fd >/dev/null 2>&1 && command -v fdfind >/dev/null 2>&1; then
+    alias fd='fdfind'
 fi

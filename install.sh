@@ -33,11 +33,36 @@ install_macos() {
 
 install_fedora() {
     info "Installing packages with dnf"
-    sudo dnf install -y git stow neovim nodejs ripgrep fd-find python3 gcc unzip curl \
-        tree-sitter-cli gh fzf zoxide git-delta \
-        zsh zsh-autosuggestions zsh-syntax-highlighting
-    # Separate: in the Fedora repos, but not in RHEL/EPEL.
+
+    # RHEL clones need EPEL for fzf, zoxide, git-delta and the zsh plugins.
+    # ($ID was set when install_linux sourced /etc/os-release.)
+    if [ "${ID:-}" != fedora ]; then
+        sudo dnf install -y epel-release 2>/dev/null ||
+            warn "Could not enable EPEL; some optional packages may be skipped below."
+    fi
+
+    sudo dnf install -y git stow neovim nodejs npm ripgrep fd-find python3 gcc unzip curl zsh
+
+    # These are not packaged everywhere (RHEL/EPEL has no gh or tree-sitter-cli,
+    # for example) and one unknown name fails the whole dnf transaction, so
+    # install them one at a time and keep going when one is missing.
+    local pkg
+    for pkg in tree-sitter-cli gh fzf zoxide git-delta \
+               zsh-autosuggestions zsh-syntax-highlighting; do
+        sudo dnf install -y "$pkg" 2>/dev/null ||
+            warn "$pkg is not available from dnf on this system; skipping."
+    done
+
+    # In the Fedora repos, but not in RHEL/EPEL.
     sudo dnf install -y starship 2>/dev/null || install_starship_fallback
+
+    if ! command -v tree-sitter >/dev/null 2>&1; then
+        info "tree-sitter-cli not packaged here; installing via npm"
+        sudo npm install -g tree-sitter-cli
+    fi
+    command -v gh >/dev/null 2>&1 ||
+        warn "gh is not in RHEL/EPEL. To install it, add GitHub's repo:" \
+             "https://cli.github.com/packages/rpm/gh-cli.repo"
 }
 
 # Some packages (e.g. git-delta) only exist in apt on newer Debian/Ubuntu
@@ -81,6 +106,26 @@ install_treesitter_cli() {
     fi
 }
 
+# Debian and Ubuntu install fd's binary as fdfind. Symlink it to ~/.local/bin/fd
+# so tools that call the binary directly (Neovim pickers, fzf) can find it too;
+# the alias in aliases.sh only covers interactive shells.
+link_fdfind() {
+    if ! command -v fd >/dev/null 2>&1 && command -v fdfind >/dev/null 2>&1; then
+        info "Symlinking fdfind to ~/.local/bin/fd"
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd"
+    fi
+}
+
+# LazyVim needs Neovim 0.10+, which not every distro repo has caught up to.
+check_neovim_version() {
+    command -v nvim >/dev/null 2>&1 || return 0
+    if ! nvim --headless -c 'if has("nvim-0.10") | q | else | cq | endif' >/dev/null 2>&1; then
+        warn "Installed Neovim is older than 0.10; the LazyVim config may not work." \
+             "Consider installing a newer release from https://github.com/neovim/neovim/releases"
+    fi
+}
+
 install_starship_apt() {
     if apt-cache show starship >/dev/null 2>&1; then
         sudo apt-get install -y starship
@@ -100,6 +145,7 @@ install_ubuntu() {
     install_apt_optional git-delta
     install_treesitter_cli
     install_starship_apt
+    link_fdfind
 }
 
 install_debian() {
@@ -111,10 +157,7 @@ install_debian() {
     install_apt_optional git-delta
     install_treesitter_cli
     install_starship_apt
-    if ! nvim --headless -c 'if has("nvim-0.10") | q | else | cq | endif' >/dev/null 2>&1; then
-        warn "Installed Neovim is older than 0.10; the LazyVim config may not work." \
-             "Consider installing a newer release from https://github.com/neovim/neovim/releases"
-    fi
+    link_fdfind
 }
 
 install_arch() {
@@ -162,8 +205,8 @@ install_nerd_font_linux() {
     fc-cache -f "$fontdir"
 }
 
-# Point Ptyxis (GNOME's terminal) at the nerd font — only when Ptyxis and its
-# gsettings schema actually exist on this machine.
+# Point Ptyxis (GNOME's terminal) at the nerd font, but only if Ptyxis and
+# its gsettings schema actually exist on this machine.
 configure_ptyxis() {
     command -v ptyxis >/dev/null 2>&1 || return 0
     command -v gsettings >/dev/null 2>&1 || return 0
@@ -226,11 +269,11 @@ stow_packages() {
     fi
 
     # Stow refused because something real sits where a symlink belongs.
-    # Back up a conflicting file only when it is provably foreign: a regular
-    # file, not the same inode as the repo's copy, and living at its literal
-    # physical path (never reached through a symlinked parent — that could
-    # be this repo's own files). Anything ambiguous is left for stow to
-    # report as a conflict rather than moved.
+    # Only back up a conflicting file when it is clearly not ours: a regular
+    # file, not the same inode as the repo's copy, and sitting at its literal
+    # physical path (not reached through a symlinked parent, which could be
+    # this repo's own files). Anything ambiguous is left for stow to report
+    # as a conflict rather than moved.
     local pkg file target
     for pkg in "${STOW_PACKAGES[@]}"; do
         while IFS= read -r file; do
@@ -247,15 +290,15 @@ stow_packages() {
     stow --restow "${STOW_PACKAGES[@]}"
 }
 
-# Anything personal in a backed-up shell rc should be easy to recover: copy
-# it into the corresponding .local file, fully commented out, for the user to
-# review. Never overwrites an existing .local file.
+# If a shell rc got backed up, keep whatever personal config was in it easy
+# to recover: copy it into the matching .local file with every line commented
+# out. Never overwrites an existing .local file.
 seed_local_from_backup() {
     local bak="$1" localfile="$2"
     [ -f "$bak" ] || return 0
     [ -f "$localfile" ] && return 0
 
-    info "Seeding $localfile from $bak — review it and uncomment what you want to keep"
+    info "Seeding $localfile from $bak (review it and uncomment what you want to keep)"
     {
         printf '# Seeded by install.sh from %s.\n' "$bak"
         printf '# Uncomment anything you want to keep; the repo zsh config already\n'
@@ -267,6 +310,7 @@ seed_local_from_backup() {
 case "$OS" in
     Darwin) install_macos ;;
     Linux)  install_linux
+            check_neovim_version
             install_nerd_font_linux
             configure_ptyxis
             set_default_shell_zsh ;;
