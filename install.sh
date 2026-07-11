@@ -73,9 +73,7 @@ install_apt_optional() {
         if apt-cache show "$pkg" >/dev/null 2>&1; then
             sudo apt-get install -y "$pkg"
         else
-            warn "$pkg is not available in apt on this release; skipping." \
-                 "If skipped: git is configured to use delta as its pager," \
-                 "so install git-delta manually (https://dandavison.github.io/delta/)."
+            warn "$pkg is not available in apt on this release; skipping."
         fi
     done
 }
@@ -117,13 +115,49 @@ link_fdfind() {
     fi
 }
 
-# LazyVim needs Neovim 0.10+, which not every distro repo has caught up to.
-check_neovim_version() {
-    command -v nvim >/dev/null 2>&1 || return 0
-    if ! nvim --headless -c 'if has("nvim-0.10") | q | else | cq | endif' >/dev/null 2>&1; then
-        warn "Installed Neovim is older than 0.10; the LazyVim config may not work." \
-             "Consider installing a newer release from https://github.com/neovim/neovim/releases"
+# LazyVim (as locked in lazy-lock.json) needs Neovim 0.11.2+, which not every
+# distro repo has caught up to (Debian stable, RHEL/EPEL). When the packaged
+# build is too old or missing, fall back to the official release tarball in
+# ~/.local/opt/nvim, like the starship fallback. The release binaries need
+# glibc 2.31+, so ancient distros still end up with the warning.
+nvim_is_current() {
+    "$1" --headless -c 'if has("nvim-0.11.2") | q | else | cq | endif' >/dev/null 2>&1
+}
+
+install_neovim_fallback() {
+    # Accept the packaged nvim or a previously installed fallback copy
+    # (~/.local/bin may not be on PATH yet during a first run).
+    if command -v nvim >/dev/null 2>&1 && nvim_is_current nvim; then
+        return
     fi
+    if [ -x "$HOME/.local/bin/nvim" ] && nvim_is_current "$HOME/.local/bin/nvim"; then
+        return
+    fi
+
+    local arch asset tmp
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64)        asset=nvim-linux-x86_64.tar.gz ;;
+        aarch64|arm64) asset=nvim-linux-arm64.tar.gz ;;
+        *)  warn "Packaged Neovim is older than 0.11.2 and there is no release tarball" \
+                 "for $arch; the LazyVim config may not work. Build a newer Neovim:" \
+                 "https://github.com/neovim/neovim/blob/master/BUILD.md"
+            return ;;
+    esac
+
+    info "Packaged Neovim is missing or older than 0.11.2; installing the latest release to ~/.local/opt/nvim"
+    tmp="$(mktemp -d)"
+    if curl -fsSL "https://github.com/neovim/neovim/releases/latest/download/$asset" |
+           tar -xzf - -C "$tmp"; then
+        rm -rf "$HOME/.local/opt/nvim"
+        mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
+        mv "$tmp/${asset%.tar.gz}" "$HOME/.local/opt/nvim"
+        ln -sf "$HOME/.local/opt/nvim/bin/nvim" "$HOME/.local/bin/nvim"
+    else
+        warn "Neovim download failed; the LazyVim config may not work (needs 0.11.2+)." \
+             "Install a newer release from https://github.com/neovim/neovim/releases"
+    fi
+    rm -rf "$tmp"
 }
 
 install_starship_apt() {
@@ -132,6 +166,44 @@ install_starship_apt() {
     else
         install_starship_fallback
     fi
+}
+
+# .gitconfig points git at delta unconditionally, but delta isn't packaged
+# everywhere (older Debian/Ubuntu, RHEL without EPEL). Fall back to a static
+# binary from the GitHub release; failing that, override the pager in
+# ~/.gitconfig.local (included last, so it wins) so git isn't left invoking
+# a missing command.
+DELTA_VERSION=0.19.2
+
+install_delta_fallback() {
+    if command -v delta >/dev/null 2>&1 || [ -x "$HOME/.local/bin/delta" ]; then
+        return
+    fi
+
+    local arch target tmp
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64)        target=x86_64-unknown-linux-musl ;;
+        aarch64|arm64) target=aarch64-unknown-linux-gnu ;;
+        *)             target="" ;;
+    esac
+
+    if [ -n "$target" ]; then
+        info "delta not packaged here; installing $DELTA_VERSION from GitHub releases to ~/.local/bin"
+        tmp="$(mktemp -d)"
+        if curl -fsSL "https://github.com/dandavison/delta/releases/download/$DELTA_VERSION/delta-$DELTA_VERSION-$target.tar.gz" |
+               tar -xzf - -C "$tmp"; then
+            mkdir -p "$HOME/.local/bin"
+            mv "$tmp/delta-$DELTA_VERSION-$target/delta" "$HOME/.local/bin/delta"
+        fi
+        rm -rf "$tmp"
+        [ -x "$HOME/.local/bin/delta" ] && return
+    fi
+
+    warn "delta unavailable; pointing git back at less in ~/.gitconfig.local." \
+         "Remove the core.pager/interactive.diffFilter overrides there once delta is installed."
+    git config --file "$HOME/.gitconfig.local" core.pager less
+    git config --file "$HOME/.gitconfig.local" interactive.diffFilter cat
 }
 
 install_ubuntu() {
@@ -188,7 +260,10 @@ install_nerd_font_linux() {
         warn "fontconfig not installed; skipping JetBrainsMono Nerd Font install."
         return
     fi
-    if fc-list | grep -qi 'JetBrainsMono Nerd Font'; then
+    # Plain grep (not -q) reads all of fc-list's output. grep -q exits at the
+    # first match, which can kill fc-list with SIGPIPE and, under pipefail,
+    # make the check fail even though the font is installed.
+    if fc-list | grep -i 'JetBrainsMono Nerd Font' >/dev/null; then
         info "JetBrainsMono Nerd Font already installed"
         return
     fi
@@ -210,7 +285,8 @@ install_nerd_font_linux() {
 configure_ptyxis() {
     command -v ptyxis >/dev/null 2>&1 || return 0
     command -v gsettings >/dev/null 2>&1 || return 0
-    gsettings list-schemas 2>/dev/null | grep -qx 'org.gnome.Ptyxis' || return 0
+    # Plain grep, not -q: see the SIGPIPE note in install_nerd_font_linux.
+    gsettings list-schemas 2>/dev/null | grep -x 'org.gnome.Ptyxis' >/dev/null || return 0
 
     info "Setting Ptyxis font to JetBrainsMono Nerd Font 13"
     gsettings set org.gnome.Ptyxis use-system-font false
@@ -242,7 +318,7 @@ set_default_shell_zsh() {
 setup_git_credential_helper() {
     local localconfig="$HOME/.gitconfig.local"
 
-    if [ -f "$localconfig" ] && grep -q '^\[credential\]' "$localconfig"; then
+    if git config --file "$localconfig" --get credential.helper >/dev/null 2>&1; then
         info "Credential helper already configured in $localconfig"
         return
     fi
@@ -274,15 +350,19 @@ stow_packages() {
     # physical path (not reached through a symlinked parent, which could be
     # this repo's own files). Anything ambiguous is left for stow to report
     # as a conflict rather than moved.
-    local pkg file target
+    local pkg file target bak
     for pkg in "${STOW_PACKAGES[@]}"; do
         while IFS= read -r file; do
             target="$HOME/${file#"$pkg"/}"
             if [ -f "$target" ] && [ ! -L "$target" ] &&
                ! [ "$target" -ef "$file" ] &&
                [ "$(realpath "$target")" = "$target" ]; then
-                warn "Backing up existing $target to $target.bak"
-                mv "$target" "$target.bak"
+                # Never clobber an earlier backup: fall back to a
+                # timestamped name when .bak is already taken.
+                bak="$target.bak"
+                [ -e "$bak" ] && bak="$target.bak.$(date +%Y%m%d%H%M%S)"
+                warn "Backing up existing $target to $bak"
+                mv "$target" "$bak"
             fi
         done < <(cd "$pkg" && find . -type f | sed "s|^\./|$pkg/|")
     done
@@ -310,7 +390,8 @@ seed_local_from_backup() {
 case "$OS" in
     Darwin) install_macos ;;
     Linux)  install_linux
-            check_neovim_version
+            install_neovim_fallback
+            install_delta_fallback
             install_nerd_font_linux
             configure_ptyxis
             set_default_shell_zsh ;;

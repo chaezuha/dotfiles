@@ -18,7 +18,7 @@ cd ~/dotfiles
 ./install.sh
 ```
 
-The script installs the needed packages (git, stow, neovim, zsh, fzf, zoxide, git-delta, starship, ...) with the platform's package manager, installs the JetBrainsMono Nerd Font, then stows the packages. Where starship isn't packaged (RHEL, older Debian/Ubuntu) it falls back to the [official installer](https://starship.rs/guide/), which puts the binary in `~/.local/bin`. Supported platforms:
+The script installs the needed packages (git, stow, neovim, zsh, fzf, zoxide, git-delta, starship, ...) with the platform's package manager, installs the JetBrainsMono Nerd Font, then stows the packages. Where a tool isn't packaged (RHEL, older Debian/Ubuntu) the script falls back to installing it under `~/.local`: starship via its [official installer](https://starship.rs/guide/), git-delta from its GitHub release, and Neovim from the official release tarball whenever the packaged build is older than the 0.11.2 LazyVim needs. Supported platforms:
 
 - **macOS** (Homebrew, must already be installed). Also installs Ghostty
 - **Fedora** / RHEL-family (dnf). On RHEL clones the script tries to enable EPEL first. Packages that still aren't available get skipped with a warning instead of failing the run: tree-sitter-cli is installed through npm instead, and for gh it prints the GitHub repo to add
@@ -30,7 +30,7 @@ Since Debian and Ubuntu name the fd binary `fdfind`, the script symlinks it to `
 
 Ghostty is only installed (and its config only stowed) on macOS. On Linux, the font is installed to `~/.local/share/fonts` and, if [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) is present, its font is set via gsettings. Zsh is the shell everywhere: the plugins (`zsh-autosuggestions`, `zsh-syntax-highlighting`) come from Homebrew on macOS and from the distro packages on Linux, where the script also installs zsh itself and switches the login shell to it (`sudo chsh`).
 
-Any existing config file that would conflict with a symlink is backed up to `<file>.bak`. The script is safe to re-run.
+Any existing config file that would conflict with a symlink is backed up to `<file>.bak` (or a timestamped `<file>.bak.<timestamp>` if a `.bak` already exists — earlier backups are never overwritten). The script is safe to re-run.
 
 ### Manual setup
 
