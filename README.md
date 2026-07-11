@@ -56,6 +56,15 @@ It's also the place for any other per-machine overrides (work email, etc.).
 
 The shell configs work the same way: `~/.zshrc.local` and `~/.bashrc.local` are sourced last (if they exist) and are never tracked in the repo.
 
+## Adding your own shell config
+
+- **Every machine**: edit `shell/.bashrc` / `shell/.zshrc` (or the shared `shell/.config/shell/*.sh`) in the repo and commit.
+- **Just this machine**: put it in `~/.bashrc.local` / `~/.zshrc.local` — sourced last, never tracked.
+
+Because `~/.bashrc` is a symlink into the repo, installers that append to it (rustup, nvm, conda, …) write into the repo file — `git diff` will show exactly what they added. Commit it if it belongs everywhere, or move it to the `.local` file if not. Common ones are already handled: the repo config sources `~/.cargo/env` when it exists, so rustup leaves the file alone.
+
+When the install script backs up a pre-existing `.bashrc`/`.zshrc` to `.bak`, it also copies the contents into the corresponding `.local` file with every line commented out — review it and uncomment anything personal you want to keep (the repo config already covers the distro defaults: prompt, completion, history, PATH). It never overwrites an existing `.local` file.
+
 ## Notes
 
 To remove a package's symlinks:

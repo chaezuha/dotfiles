@@ -8,6 +8,8 @@ alias ..='cd ..'
 alias ...='cd ../..'
 
 alias grep='grep --color=auto'
+alias fgrep='fgrep --color=auto'
+alias egrep='egrep --color=auto'
 
 # BSD ls (macOS) colors with -G, GNU ls with --color.
 if [ "$(uname -s)" = "Darwin" ]; then

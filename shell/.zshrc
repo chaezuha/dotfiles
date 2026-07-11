@@ -5,6 +5,10 @@
 [ -f "$HOME/.config/shell/env.sh" ] && . "$HOME/.config/shell/env.sh"
 [ -f "$HOME/.config/shell/aliases.sh" ] && . "$HOME/.config/shell/aliases.sh"
 
+# Rust toolchain (rustup). Keeping the literal `. "$HOME/.cargo/env"` line
+# here also stops rustup's installer from appending its own copy.
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+
 # --- History ---
 HISTFILE="$HOME/.zsh_history"
 HISTSIZE=100000

@@ -198,6 +198,23 @@ stow_packages() {
     stow --restow "${STOW_PACKAGES[@]}"
 }
 
+# Anything personal in a backed-up shell rc should be easy to recover: copy
+# it into the corresponding .local file, fully commented out, for the user to
+# review. Never overwrites an existing .local file.
+seed_local_from_backup() {
+    local bak="$1" localfile="$2"
+    [ -f "$bak" ] || return 0
+    [ -f "$localfile" ] && return 0
+
+    info "Seeding $localfile from $bak — review it and uncomment what you want to keep"
+    {
+        printf '# Seeded by install.sh from %s.\n' "$bak"
+        printf '# Uncomment anything you want to keep; the repo shell config already\n'
+        printf '# covers the distro defaults (prompt, completion, history, cargo, ...).\n\n'
+        sed 's/^/# /' "$bak"
+    } >"$localfile"
+}
+
 case "$OS" in
     Darwin) install_macos ;;
     Linux)  install_linux
@@ -208,5 +225,7 @@ esac
 
 setup_git_credential_helper
 stow_packages
+seed_local_from_backup "$HOME/.bashrc.bak" "$HOME/.bashrc.local"
+seed_local_from_backup "$HOME/.zshrc.bak" "$HOME/.zshrc.local"
 
 info "Done."
