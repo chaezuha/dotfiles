@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 OS="$(uname -s)"
-STOW_PACKAGES=(gitconfig nvim)
+STOW_PACKAGES=(gitconfig gitignore nvim shell)
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -19,10 +19,13 @@ install_macos() {
 
     info "Installing packages with Homebrew"
     local pkg
-    for pkg in git stow neovim node ripgrep fd tree-sitter-cli gh; do
+    for pkg in git stow neovim node ripgrep fd tree-sitter-cli gh \
+               fzf zoxide git-delta zsh-autosuggestions zsh-syntax-highlighting; do
         brew list "$pkg" >/dev/null 2>&1 || brew install "$pkg"
     done
-    brew list --cask ghostty >/dev/null 2>&1 || brew install --cask ghostty
+    for pkg in ghostty font-jetbrains-mono-nerd-font; do
+        brew list --cask "$pkg" >/dev/null 2>&1 || brew install --cask "$pkg"
+    done
 
     STOW_PACKAGES+=(ghostty)
 }
@@ -30,7 +33,22 @@ install_macos() {
 install_fedora() {
     info "Installing packages with dnf"
     sudo dnf install -y git stow neovim nodejs ripgrep fd-find python3 gcc unzip curl \
-        tree-sitter-cli gh
+        tree-sitter-cli gh fzf zoxide git-delta
+}
+
+# Some packages (e.g. git-delta) only exist in apt on newer Debian/Ubuntu
+# releases; install what's available and warn about the rest.
+install_apt_optional() {
+    local pkg
+    for pkg in "$@"; do
+        if apt-cache show "$pkg" >/dev/null 2>&1; then
+            sudo apt-get install -y "$pkg"
+        else
+            warn "$pkg is not available in apt on this release; skipping." \
+                 "If skipped: git is configured to use delta as its pager," \
+                 "so install git-delta manually (https://dandavison.github.io/delta/)."
+        fi
+    done
 }
 
 # tree-sitter-cli only exists in apt on the newest Debian/Ubuntu releases;
@@ -53,7 +71,8 @@ install_ubuntu() {
     sudo apt-get install -y software-properties-common
     sudo add-apt-repository -y ppa:neovim-ppa/unstable
     sudo apt-get install -y git stow neovim nodejs npm ripgrep fd-find \
-        python3 python3-venv build-essential unzip curl gh
+        python3 python3-venv build-essential unzip curl gh fzf zoxide
+    install_apt_optional git-delta
     install_treesitter_cli
 }
 
@@ -61,7 +80,8 @@ install_debian() {
     info "Installing packages with apt"
     sudo apt-get update
     sudo apt-get install -y git stow neovim nodejs npm ripgrep fd-find \
-        python3 python3-venv build-essential unzip curl gh
+        python3 python3-venv build-essential unzip curl gh fzf zoxide
+    install_apt_optional git-delta
     install_treesitter_cli
     if ! nvim --headless -c 'if has("nvim-0.10") | q | else | cq | endif' >/dev/null 2>&1; then
         warn "Installed Neovim is older than 0.10; the LazyVim config may not work." \
@@ -72,7 +92,7 @@ install_debian() {
 install_arch() {
     info "Installing packages with pacman"
     sudo pacman -S --needed --noconfirm git stow neovim nodejs npm ripgrep fd python gcc unzip curl \
-        tree-sitter-cli github-cli
+        tree-sitter-cli github-cli fzf zoxide git-delta
 }
 
 install_linux() {
@@ -87,6 +107,42 @@ install_linux() {
         *arch*)            install_arch ;;
         *) die "Unsupported distribution '${ID:-unknown}'. Install git, stow, neovim, node, ripgrep, fd, tree-sitter, gh, python3, and a C compiler manually, then run: stow ${STOW_PACKAGES[*]}" ;;
     esac
+}
+
+# On macOS the font comes from a Homebrew cask; on Linux, download the
+# nerd-fonts release into the user font directory.
+install_nerd_font_linux() {
+    if ! command -v fc-list >/dev/null 2>&1; then
+        warn "fontconfig not installed; skipping JetBrainsMono Nerd Font install."
+        return
+    fi
+    if fc-list | grep -qi 'JetBrainsMono Nerd Font'; then
+        info "JetBrainsMono Nerd Font already installed"
+        return
+    fi
+
+    info "Installing JetBrainsMono Nerd Font to ~/.local/share/fonts"
+    local tmp fontdir
+    tmp="$(mktemp -d)"
+    fontdir="$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
+    curl -fsSL -o "$tmp/JetBrainsMono.zip" \
+        "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip"
+    mkdir -p "$fontdir"
+    unzip -oq "$tmp/JetBrainsMono.zip" -d "$fontdir"
+    rm -rf "$tmp"
+    fc-cache -f "$fontdir"
+}
+
+# Point Ptyxis (GNOME's terminal) at the nerd font — only when Ptyxis and its
+# gsettings schema actually exist on this machine.
+configure_ptyxis() {
+    command -v ptyxis >/dev/null 2>&1 || return 0
+    command -v gsettings >/dev/null 2>&1 || return 0
+    gsettings list-schemas 2>/dev/null | grep -qx 'org.gnome.Ptyxis' || return 0
+
+    info "Setting Ptyxis font to JetBrainsMono Nerd Font 13"
+    gsettings set org.gnome.Ptyxis use-system-font false
+    gsettings set org.gnome.Ptyxis font-name 'JetBrainsMono Nerd Font 13'
 }
 
 # Platform-specific git settings live in ~/.gitconfig.local (included from
@@ -144,7 +200,9 @@ stow_packages() {
 
 case "$OS" in
     Darwin) install_macos ;;
-    Linux)  install_linux ;;
+    Linux)  install_linux
+            install_nerd_font_linux
+            configure_ptyxis ;;
     *)      die "Unsupported OS: $OS" ;;
 esac
 

@@ -1,1 +1,4 @@
 .DS_Store
+
+# Machine-specific override files (e.g. .zshrc.local) never belong in the repo.
+*.local

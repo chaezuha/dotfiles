@@ -1,0 +1,14 @@
+# Global git ignore (read automatically from ~/.config/git/ignore).
+# OS and editor junk only — project-specific ignores belong in the project.
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Tooling
+**/.claude/settings.local.json
