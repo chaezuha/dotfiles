@@ -20,6 +20,10 @@ autoload -Uz compinit && compinit
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' menu select
 
+# --- Prompt ---
+# Apple's /etc/zshrc default, set explicitly so Linux looks the same.
+PROMPT='%n@%m %1~ %% '
+
 # --- Plugins ---
 # Sourced only if installed (brew on macOS, distro packages on Linux).
 _source_first() {

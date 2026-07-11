@@ -222,6 +222,19 @@ stow_packages() {
     stow --restow "${STOW_PACKAGES[@]}"
 }
 
+# Bash is no longer managed by these dotfiles; put back the distro's stock
+# files where the old symlinks were removed (restow prunes them). No-op on
+# macOS, which has no /etc/skel.
+restore_bash_defaults() {
+    local f
+    for f in .bashrc .bash_profile .profile; do
+        if [ ! -e "$HOME/$f" ] && [ -f "/etc/skel/$f" ]; then
+            info "Restoring default $f from /etc/skel"
+            cp "/etc/skel/$f" "$HOME/$f"
+        fi
+    done
+}
+
 # Anything personal in a backed-up shell rc should be easy to recover: copy
 # it into the corresponding .local file, fully commented out, for the user to
 # review. Never overwrites an existing .local file.
@@ -233,8 +246,8 @@ seed_local_from_backup() {
     info "Seeding $localfile from $bak — review it and uncomment what you want to keep"
     {
         printf '# Seeded by install.sh from %s.\n' "$bak"
-        printf '# Uncomment anything you want to keep; the repo shell config already\n'
-        printf '# covers the distro defaults (prompt, completion, history, cargo, ...).\n\n'
+        printf '# Uncomment anything you want to keep; the repo zsh config already\n'
+        printf '# covers the basics (prompt, completion, history, cargo, ...).\n\n'
         sed 's/^/# /' "$bak"
     } >"$localfile"
 }
@@ -250,7 +263,7 @@ esac
 
 setup_git_credential_helper
 stow_packages
-seed_local_from_backup "$HOME/.bashrc.bak" "$HOME/.bashrc.local"
+restore_bash_defaults
 seed_local_from_backup "$HOME/.zshrc.bak" "$HOME/.zshrc.local"
 
 info "Done."

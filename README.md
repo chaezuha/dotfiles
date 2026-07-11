@@ -41,7 +41,7 @@ Any existing config file that would conflict with a symlink is backed up to `<fi
 - **`gitconfig`** — shared `~/.gitconfig` (delta as pager, nvim as editor)
 - **`gitignore`** — global git ignore at `~/.config/git/ignore` (OS/editor junk)
 - **`nvim`** — LazyVim-based Neovim config
-- **`shell`** — `~/.zshrc`, `~/.bashrc`, and `~/.bash_profile`; the shared POSIX pieces (`env.sh`, `aliases.sh`) live in `~/.config/shell/` and are sourced by both shells
+- **`shell`** — `~/.zshrc` plus the shared POSIX pieces (`env.sh`, `aliases.sh`) in `~/.config/shell/`. Bash is intentionally unmanaged — it stays the distro default (on Linux the install script restores the `/etc/skel` files where the old symlinks were)
 - **`ghostty`** — Ghostty terminal config (macOS only)
 
 ## Machine-specific overrides
@@ -54,16 +54,16 @@ Any existing config file that would conflict with a symlink is backed up to `<fi
 
 It's also the place for any other per-machine overrides (work email, etc.).
 
-The shell configs work the same way: `~/.zshrc.local` and `~/.bashrc.local` are sourced last (if they exist) and are never tracked in the repo.
+The shell config works the same way: `~/.zshrc.local` is sourced last (if it exists) and is never tracked in the repo.
 
 ## Adding your own shell config
 
-- **Every machine**: edit `shell/.bashrc` / `shell/.zshrc` (or the shared `shell/.config/shell/*.sh`) in the repo and commit.
-- **Just this machine**: put it in `~/.bashrc.local` / `~/.zshrc.local` — sourced last, never tracked.
+- **Every machine**: edit `shell/.zshrc` (or the shared `shell/.config/shell/*.sh`) in the repo and commit.
+- **Just this machine**: put it in `~/.zshrc.local` — sourced last, never tracked.
 
-Because `~/.bashrc` is a symlink into the repo, installers that append to it (rustup, nvm, conda, …) write into the repo file — `git diff` will show exactly what they added. Commit it if it belongs everywhere, or move it to the `.local` file if not. Common ones are already handled: the repo config sources `~/.cargo/env` when it exists, so rustup leaves the file alone.
+Because `~/.zshrc` is a symlink into the repo, installers that append to it (rustup, nvm, conda, …) write into the repo file — `git diff` will show exactly what they added. Commit it if it belongs everywhere, or move it to the `.local` file if not. Common ones are already handled: the repo config sources `~/.cargo/env` when it exists, so rustup leaves the file alone.
 
-When the install script backs up a pre-existing `.bashrc`/`.zshrc` to `.bak`, it also copies the contents into the corresponding `.local` file with every line commented out — review it and uncomment anything personal you want to keep (the repo config already covers the distro defaults: prompt, completion, history, PATH). It never overwrites an existing `.local` file.
+When the install script backs up a pre-existing `.zshrc` to `.bak`, it also copies the contents into `~/.zshrc.local` with every line commented out — review it and uncomment anything personal you want to keep (the repo config already covers the basics: prompt, completion, history, PATH). It never overwrites an existing `.local` file.
 
 ## Notes
 
