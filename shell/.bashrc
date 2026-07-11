@@ -8,6 +8,13 @@ case $- in
     *) return ;;
 esac
 
+# --- Distro-wide defaults (Fedora/RHEL convention; no-op elsewhere) ---
+# Fedora's bash reads no system rc for interactive shells; ~/.bashrc is
+# expected to source /etc/bashrc (prompt, window titles, etc.) itself.
+if [ -f /etc/bashrc ]; then
+    . /etc/bashrc
+fi
+
 # --- Shared config ---
 [ -f "$HOME/.config/shell/env.sh" ] && . "$HOME/.config/shell/env.sh"
 [ -f "$HOME/.config/shell/aliases.sh" ] && . "$HOME/.config/shell/aliases.sh"
