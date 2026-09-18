@@ -30,7 +30,13 @@ Since Debian and Ubuntu name the fd binary `fdfind`, the script symlinks it to `
 
 Ghostty is only installed (and its config only stowed) on macOS. On Linux, the font is installed to `~/.local/share/fonts` and, if [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) is present, its font is set via gsettings. Zsh is the shell everywhere: the plugins (`zsh-autosuggestions`, `zsh-syntax-highlighting`) come from Homebrew on macOS and from the distro packages on Linux, where the script also installs zsh itself and switches the login shell to it (`sudo chsh`).
 
-Any existing config file that would conflict with a symlink is backed up to `<file>.bak` (or a timestamped `<file>.bak.<timestamp>` if a `.bak` already exists — earlier backups are never overwritten). The script is safe to re-run.
+Conflicting regular config files are backed up to `<file>.bak`, or `<file>.bak.<timestamp>` with a numeric suffix if needed. Existing backups, including dangling symlinks, are never overwritten. Stow is checked before applying changes. On a detected failure, the script restores this run's backups wherever the original path is still absent. If a destination is occupied (including by a symlink), it keeps the backup and prints both paths for manual recovery. Interruptions may also require manual recovery; package installations are not rolled back. Successful installs are safe to re-run.
+
+### Git signing
+
+The shared config enables SSH commit signing with `~/.ssh/id_ed25519.pub`. This requires Git 2.34 or newer and access to the corresponding signing key (normally loaded into your SSH agent). Configure a different key or signing format in `~/.gitconfig.local` when needed.
+
+After installing and seeding the configs, the installer checks signing using a temporary repository. It announces the check because your agent may request a passphrase, security-key touch, or approval. If validation fails, it exits non-zero with **configs installed; signing setup incomplete**: the installed configs remain in place. Follow the diagnostic, make the key available to your agent, and re-run. The installer never generates keys or disables signing automatically; an explicit local `commit.gpgsign = false` skips validation. The SSH Git-version requirement does not apply to an OpenPGP override.
 
 ### Manual setup
 
@@ -64,9 +70,13 @@ The shell config works the same way: `~/.zshrc.local` is sourced last (if it exi
 - **Every machine**: edit `shell/.zshrc` (or the shared `shell/.config/shell/*.sh`) in the repo and commit.
 - **Just this machine**: put it in `~/.zshrc.local`. Sourced last, never tracked.
 
-Because `~/.zshrc` is a symlink into the repo, installers that append to it (rustup, nvm, conda, ...) write into the repo file, so `git diff` shows exactly what they added. Commit it if it belongs everywhere, or move it to the `.local` file if not. Common ones are already handled: the repo config sources `~/.cargo/env` when it exists, so rustup leaves the file alone.
+Because `~/.zshrc` is a symlink into the repo, installers that append to it (rustup, nvm, conda, Unity, ...) write into the repo file, so `git diff` shows exactly what they added. Commit it if it belongs everywhere, or move it to the `.local` file if not. The repo config already sources `~/.cargo/env` and `~/.unity/env` when present, before local overrides. Review additions from future tool installers for duplicates or machine-specific paths.
 
-When the install script backs up a pre-existing `.zshrc` to `.bak`, it also copies the contents into `~/.zshrc.local` with every line commented out. Review it and uncomment anything personal you want to keep; the repo config already covers the basics (prompt, completion, history, PATH). It never overwrites an existing `.local` file.
+After a successful Stow run, the installer copies the `.zshrc` backup made by that run into `~/.zshrc.local`, with every line commented out and owner-only (`0600`) permissions. This uses the actual backup path, including a timestamp or suffix; historical backups are never used on reruns. Review it and uncomment anything personal you want to keep. An existing `.zshrc.local`, including a dangling symlink, is always preserved.
+
+## Verification
+
+Run `bash tests/install_test.sh` with Git, Stow, and OpenSSH installed. The suite uses temporary homes, fixture packages, and a throwaway SSH agent; it does not install packages or use your signing keys. Neovim and Zsh integration checks are skipped explicitly if those executables are unavailable. On macOS, `/bin/bash tests/install_test.sh` also checks compatibility with Bash 3.2.
 
 ## Notes
 

@@ -69,6 +69,9 @@ if command -v fzf >/dev/null 2>&1; then
     fi
 fi
 
+# Unity CLI (optional, like the Rust toolchain above).
+[ -f "$HOME/.unity/env" ] && . "$HOME/.unity/env"
+
 # --- Machine-specific overrides, always last ---
 if [ -f "$HOME/.zshrc.local" ]; then
     . "$HOME/.zshrc.local"

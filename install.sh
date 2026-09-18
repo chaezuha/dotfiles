@@ -2,13 +2,6 @@
 # Install script for these dotfiles.
 # Supported: macOS (Homebrew), Fedora/RHEL-family (dnf), Ubuntu (apt + Neovim PPA),
 # Debian (apt), Arch (pacman). Safe to re-run.
-set -euo pipefail
-
-cd "$(dirname "$0")"
-
-OS="$(uname -s)"
-STOW_PACKAGES=(gitconfig gitignore nvim shell starship)
-
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -121,7 +114,7 @@ link_fdfind() {
 # ~/.local/opt/nvim, like the starship fallback. The release binaries need
 # glibc 2.31+, so ancient distros still end up with the warning.
 nvim_is_current() {
-    "$1" --headless -c 'if has("nvim-0.11.2") | q | else | cq | endif' >/dev/null 2>&1
+    "$1" --headless -u NONE -i NONE -n -c 'if has("nvim-0.11.2") | q | else | cq | endif' >/dev/null 2>&1
 }
 
 install_neovim_fallback() {
@@ -173,8 +166,6 @@ install_starship_apt() {
 # binary from the GitHub release; failing that, override the pager in
 # ~/.gitconfig.local (included last, so it wins) so git isn't left invoking
 # a missing command.
-DELTA_VERSION=0.19.2
-
 install_delta_fallback() {
     if command -v delta >/dev/null 2>&1 || [ -x "$HOME/.local/bin/delta" ]; then
         return
@@ -336,11 +327,39 @@ setup_git_credential_helper() {
     printf '[credential]\n\thelper = %s\n' "$helper" >>"$localconfig"
 }
 
+path_exists() {
+    [ -e "$1" ] || [ -L "$1" ]
+}
+
+# mv -n may report success even when it skips a move. Check the paths instead.
+move_without_clobbering() {
+    mv -n "$1" "$2" || :
+    ! path_exists "$1" && path_exists "$2"
+}
+
+# Arguments are original/backup pairs, restored in reverse order.
+restore_backups() {
+    local paths=("$@") i target bak
+    for ((i=$#-2; i>=0; i-=2)); do
+        target="${paths[$i]}"
+        bak="${paths[$((i+1))]}"
+        if ! path_exists "$target" && move_without_clobbering "$bak" "$target"; then
+            info "Restored $target from $bak"
+        else
+            warn "Backup retained at $bak; could not restore $target."
+            if [ -L "$target" ]; then
+                warn "Review and remove the symlink at $target before restoring $bak."
+            fi
+        fi
+    done
+}
+
 stow_packages() {
+    ZSHRC_BACKUP=""
     info "Stowing: ${STOW_PACKAGES[*]}"
 
-    # No conflicts on an already-set-up machine: stow succeeds and we're done.
-    if stow --restow "${STOW_PACKAGES[@]}" 2>/dev/null; then
+    if stow --target="$HOME" --simulate --restow "${STOW_PACKAGES[@]}" 2>/dev/null; then
+        stow --target="$HOME" --restow "${STOW_PACKAGES[@]}" || return 1
         return
     fi
 
@@ -350,24 +369,46 @@ stow_packages() {
     # physical path (not reached through a symlinked parent, which could be
     # this repo's own files). Anything ambiguous is left for stow to report
     # as a conflict rather than moved.
-    local pkg file target bak
+    local pkg file target bak base suffix backup_count=0 backup_failed=false
+    local backups=()
     for pkg in "${STOW_PACKAGES[@]}"; do
         while IFS= read -r file; do
             target="$HOME/${file#"$pkg"/}"
             if [ -f "$target" ] && [ ! -L "$target" ] &&
                ! [ "$target" -ef "$file" ] &&
                [ "$(realpath "$target")" = "$target" ]; then
-                # Never clobber an earlier backup: fall back to a
-                # timestamped name when .bak is already taken.
                 bak="$target.bak"
-                [ -e "$bak" ] && bak="$target.bak.$(date +%Y%m%d%H%M%S)"
+                if path_exists "$bak"; then
+                    base="$target.bak.$(date +%Y%m%d%H%M%S)"
+                    bak="$base"
+                    suffix=0
+                    while path_exists "$bak"; do
+                        suffix=$((suffix+1))
+                        bak="$base.$suffix"
+                    done
+                fi
                 warn "Backing up existing $target to $bak"
-                mv "$target" "$bak"
+                if ! move_without_clobbering "$target" "$bak"; then
+                    warn "Could not back up $target to $bak; stopping installation."
+                    backup_failed=true
+                    break
+                fi
+                backups[backup_count]="$target"
+                backups[backup_count+1]="$bak"
+                backup_count=$((backup_count+2))
+                [ "$target" != "$HOME/.zshrc" ] || ZSHRC_BACKUP="$bak"
             fi
         done < <(cd "$pkg" && find . -type f | sed "s|^\./|$pkg/|")
+        if "$backup_failed"; then break; fi
     done
 
-    stow --restow "${STOW_PACKAGES[@]}"
+    if "$backup_failed" ||
+       ! stow --target="$HOME" --simulate --restow "${STOW_PACKAGES[@]}" ||
+       ! stow --target="$HOME" --restow "${STOW_PACKAGES[@]}"; then
+        if [ "$backup_count" -gt 0 ]; then restore_backups "${backups[@]}"; fi
+        ZSHRC_BACKUP=""
+        return 1
+    fi
 }
 
 # If a shell rc got backed up, keep whatever personal config was in it easy
@@ -376,30 +417,118 @@ stow_packages() {
 seed_local_from_backup() {
     local bak="$1" localfile="$2"
     [ -f "$bak" ] || return 0
-    [ -f "$localfile" ] && return 0
+    path_exists "$localfile" && return 0
 
     info "Seeding $localfile from $bak (review it and uncomment what you want to keep)"
-    {
-        printf '# Seeded by install.sh from %s.\n' "$bak"
-        printf '# Uncomment anything you want to keep; the repo zsh config already\n'
-        printf '# covers the basics (prompt, completion, history, cargo, ...).\n\n'
-        sed 's/^/# /' "$bak"
-    } >"$localfile"
+    (
+        umask 077
+        set -C
+        if ! exec 3>"$localfile"; then
+            warn "Could not exclusively create $localfile; leaving it untouched."
+            exit 1
+        fi
+        if {
+            printf '# Seeded by install.sh from %s.\n' "$bak" &&
+            printf '# Uncomment anything you want to keep; the repo zsh config already\n' &&
+            printf '# covers the basics (prompt, completion, history, cargo, ...).\n\n' &&
+            sed 's/^/# /' "$bak"
+        } >&3; then
+            exec 3>&-
+        else
+            exec 3>&-
+            rm -f "$localfile"
+            warn "Failed to seed $localfile from $bak."
+            exit 1
+        fi
+    )
 }
 
-case "$OS" in
-    Darwin) install_macos ;;
-    Linux)  install_linux
-            install_neovim_fallback
-            install_delta_fallback
-            install_nerd_font_linux
-            configure_ptyxis
-            set_default_shell_zsh ;;
-    *)      die "Unsupported OS: $OS" ;;
-esac
+# Run inside a disposable repository, so project-local config cannot affect
+# validation of the newly installed global config and its local overrides.
+probe_git_signing() {
+    local repo="$1" enabled format version tree status
+    if enabled="$(git -C "$repo" config --bool --get commit.gpgsign)"; then
+        if [ "$enabled" = false ]; then
+            info "Git signing explicitly disabled; skipping signing check."
+            return 0
+        fi
+    else
+        status=$?
+        [ "$status" -eq 1 ] || return "$status"
+    fi
+    if format="$(git -C "$repo" config --get gpg.format)"; then
+        :
+    else
+        status=$?
+        [ "$status" -eq 1 ] || return "$status"
+        format=openpgp
+    fi
+    if [ "$format" = ssh ]; then
+        version="$(git --version)" || return 1
+        if [[ "$version" =~ ^git\ version\ ([0-9]+)\.([0-9]+) ]]; then
+            if [ "${BASH_REMATCH[1]}" -lt 2 ] ||
+               { [ "${BASH_REMATCH[1]}" -eq 2 ] && [ "${BASH_REMATCH[2]}" -lt 34 ]; }; then
+                warn "SSH signing requires Git 2.34 or newer; found $version. Upgrade Git and re-run."
+                return 1
+            fi
+        else
+            warn "Could not determine SSH signing support from: $version"
+            return 1
+        fi
+    fi
 
-setup_git_credential_helper
-stow_packages
-seed_local_from_backup "$HOME/.zshrc.bak" "$HOME/.zshrc.local"
+    info "Checking Git signing; a passphrase, security-key touch, or agent approval may be requested."
+    tree="$(git -C "$repo" hash-object -t tree -w --stdin </dev/null)" || return 1
+    git -C "$repo" commit-tree -S "$tree" -m 'Dotfiles signing check' >/dev/null
+}
 
-info "Done."
+validate_git_signing() {
+    local tmp status=0
+    if ! tmp="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-signing.XXXXXX")"; then
+        warn "configs installed; signing setup incomplete: could not create a temporary signing repository."
+        return 1
+    fi
+    if git init --bare --quiet --template= "$tmp" && probe_git_signing "$tmp"; then
+        :
+    else
+        warn "configs installed; signing setup incomplete. See the diagnostic above."
+        warn "Check user.signingkey and gpg.format in ~/.gitconfig.local. For SSH signing," \
+             "make the configured public key available and load its private key into your SSH agent, then re-run."
+        status=1
+    fi
+    if ! rm -rf "$tmp"; then
+        warn "Could not remove temporary signing repository $tmp."
+        status=1
+    fi
+    return "$status"
+}
+
+main() {
+    set -euo pipefail
+    cd "$(dirname "${BASH_SOURCE[0]}")"
+    OS="$(uname -s)"
+    STOW_PACKAGES=(gitconfig gitignore nvim shell starship)
+    DELTA_VERSION=0.19.2
+    ZSHRC_BACKUP=""
+
+    case "$OS" in
+        Darwin) install_macos ;;
+        Linux)  install_linux
+                install_neovim_fallback
+                install_delta_fallback
+                install_nerd_font_linux
+                configure_ptyxis
+                set_default_shell_zsh ;;
+        *)      die "Unsupported OS: $OS" ;;
+    esac
+
+    setup_git_credential_helper
+    stow_packages || return 1
+    seed_local_from_backup "$ZSHRC_BACKUP" "$HOME/.zshrc.local" || return 1
+    validate_git_signing || return 1
+    info "Done."
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
