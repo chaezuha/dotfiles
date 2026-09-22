@@ -9,8 +9,12 @@ export VISUAL=nvim
 [ -n "${LANG:-}" ] || export LANG=en_US.UTF-8
 
 # Homebrew (Apple Silicon, then Intel).
-[ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
-[ -x /usr/local/bin/brew ] && eval "$(/usr/local/bin/brew shellenv)"
+# Only one: each shellenv prepends to PATH, so a second call would win.
+if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
 
 # User-installed binaries take precedence.
 case ":$PATH:" in

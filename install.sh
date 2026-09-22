@@ -27,24 +27,33 @@ install_macos() {
 install_fedora() {
     info "Installing packages with dnf"
 
-    # RHEL clones need EPEL for fzf, zoxide, git-delta and the zsh plugins.
-    # ($ID was set when install_linux sourced /etc/os-release.)
+    # RHEL clones need EPEL for stow, ripgrep, fd, fzf, zoxide, git-delta and
+    # the zsh plugins. Rocky/Alma ship epel-release in their own repos; RHEL
+    # proper only has it as a release RPM from the Fedora project.
+    # ($ID and $VERSION_ID were set when install_linux sourced /etc/os-release.)
     if [ "${ID:-}" != fedora ]; then
         sudo dnf install -y epel-release 2>/dev/null ||
-            warn "Could not enable EPEL; some optional packages may be skipped below."
+            { [ "${ID:-}" = rhel ] &&
+              sudo dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${VERSION_ID%%.*}.noarch.rpm"; } ||
+            warn "Could not enable EPEL; packages it provides (stow, ripgrep, fd, fzf, ...) may be skipped below."
     fi
 
-    sudo dnf install -y git stow neovim nodejs npm ripgrep fd-find python3 gcc unzip curl zsh
+    # Only what base RHEL-family repos and Fedora both carry.
+    sudo dnf install -y git nodejs npm python3 gcc unzip curl zsh
 
     # These are not packaged everywhere (RHEL/EPEL has no gh or tree-sitter-cli,
-    # for example) and one unknown name fails the whole dnf transaction, so
-    # install them one at a time and keep going when one is missing.
+    # and without EPEL most of them are missing) and one unknown name fails the
+    # whole dnf transaction, so install them one at a time and keep going when
+    # one is missing. Neovim has a release-tarball fallback in main.
     local pkg
-    for pkg in tree-sitter-cli gh fzf zoxide git-delta \
+    for pkg in stow neovim ripgrep fd-find tree-sitter-cli gh fzf zoxide git-delta \
                zsh-autosuggestions zsh-syntax-highlighting; do
         sudo dnf install -y "$pkg" 2>/dev/null ||
             warn "$pkg is not available from dnf on this system; skipping."
     done
+    command -v stow >/dev/null 2>&1 ||
+        die "stow is required but not available from dnf. On RHEL-family systems it comes from EPEL:" \
+            "https://docs.fedoraproject.org/en-US/epel/ (enable it, then re-run)."
 
     # In the Fedora repos, but not in RHEL/EPEL.
     sudo dnf install -y starship 2>/dev/null || install_starship_fallback
@@ -197,30 +206,31 @@ install_delta_fallback() {
     git config --file "$HOME/.gitconfig.local" interactive.diffFilter cat
 }
 
-install_ubuntu() {
-    info "Installing packages with apt (Neovim from ppa:neovim-ppa/unstable)"
-    sudo apt-get update
-    sudo apt-get install -y software-properties-common
-    sudo add-apt-repository -y ppa:neovim-ppa/unstable
+# Shared by Debian and Ubuntu; the caller has already run apt-get update.
+# gh and zoxide are missing from older releases (Debian 11, Ubuntu 20.04),
+# so they go through install_apt_optional instead of failing the install.
+install_apt_packages() {
     sudo apt-get install -y git stow neovim nodejs npm ripgrep fd-find \
-        python3 python3-venv build-essential unzip curl gh fzf zoxide \
+        python3 python3-venv build-essential unzip curl fzf \
         zsh zsh-autosuggestions zsh-syntax-highlighting
-    install_apt_optional git-delta
+    install_apt_optional git-delta gh zoxide
     install_treesitter_cli
     install_starship_apt
     link_fdfind
 }
 
+install_ubuntu() {
+    info "Installing packages with apt (Neovim from ppa:neovim-ppa/unstable)"
+    sudo apt-get update
+    sudo apt-get install -y software-properties-common
+    sudo add-apt-repository -y ppa:neovim-ppa/unstable
+    install_apt_packages
+}
+
 install_debian() {
     info "Installing packages with apt"
     sudo apt-get update
-    sudo apt-get install -y git stow neovim nodejs npm ripgrep fd-find \
-        python3 python3-venv build-essential unzip curl gh fzf zoxide \
-        zsh zsh-autosuggestions zsh-syntax-highlighting
-    install_apt_optional git-delta
-    install_treesitter_cli
-    install_starship_apt
-    link_fdfind
+    install_apt_packages
 }
 
 install_arch() {
@@ -263,10 +273,14 @@ install_nerd_font_linux() {
     local tmp fontdir
     tmp="$(mktemp -d)"
     fontdir="$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
-    curl -fsSL -o "$tmp/JetBrainsMono.zip" \
-        "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip"
-    mkdir -p "$fontdir"
-    unzip -oq "$tmp/JetBrainsMono.zip" -d "$fontdir"
+    if ! curl -fsSL -o "$tmp/JetBrainsMono.zip" \
+            "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip" ||
+       ! { mkdir -p "$fontdir" && unzip -oq "$tmp/JetBrainsMono.zip" -d "$fontdir"; }; then
+        warn "JetBrainsMono Nerd Font download failed; prompt icons may not render." \
+             "Install it later from https://www.nerdfonts.com/font-downloads"
+        rm -rf "$tmp"
+        return 0
+    fi
     rm -rf "$tmp"
     fc-cache -f "$fontdir"
 }
@@ -317,14 +331,17 @@ setup_git_credential_helper() {
     local helper
     if [ "$OS" = "Darwin" ]; then
         helper=osxkeychain
-    elif command -v git-credential-libsecret >/dev/null 2>&1; then
+    # Distros install git's helpers into its exec-path (e.g. /usr/libexec/git-core),
+    # which is usually not on PATH.
+    elif command -v git-credential-libsecret >/dev/null 2>&1 ||
+         [ -x "$(git --exec-path)/git-credential-libsecret" ]; then
         helper=libsecret
     else
         helper=cache
     fi
 
     info "Setting git credential.helper=$helper in $localconfig"
-    printf '[credential]\n\thelper = %s\n' "$helper" >>"$localconfig"
+    git config --file "$localconfig" credential.helper "$helper"
 }
 
 path_exists() {
@@ -356,6 +373,7 @@ restore_backups() {
 
 stow_packages() {
     ZSHRC_BACKUP=""
+    ZPROFILE_BACKUP=""
     info "Stowing: ${STOW_PACKAGES[*]}"
 
     if stow --target="$HOME" --simulate --restow "${STOW_PACKAGES[@]}" 2>/dev/null; then
@@ -368,11 +386,18 @@ stow_packages() {
     # file, not the same inode as the repo's copy, and sitting at its literal
     # physical path (not reached through a symlinked parent, which could be
     # this repo's own files). Anything ambiguous is left for stow to report
-    # as a conflict rather than moved.
+    # as a conflict rather than moved. Files that stow's default ignore list
+    # never links are skipped too: moving them would leave nothing behind.
     local pkg file target bak base suffix backup_count=0 backup_failed=false
     local backups=()
     for pkg in "${STOW_PACKAGES[@]}"; do
         while IFS= read -r file; do
+            case "${file##*/}" in
+                .gitignore|.gitmodules|.cvsignore|*~|\#*\#|.\#*) continue ;;
+            esac
+            case "$file" in
+                "$pkg"/README.*|"$pkg"/LICENSE.*|"$pkg"/COPYING) continue ;;
+            esac
             target="$HOME/${file#"$pkg"/}"
             if [ -f "$target" ] && [ ! -L "$target" ] &&
                ! [ "$target" -ef "$file" ] &&
@@ -396,7 +421,10 @@ stow_packages() {
                 backups[backup_count]="$target"
                 backups[backup_count+1]="$bak"
                 backup_count=$((backup_count+2))
-                [ "$target" != "$HOME/.zshrc" ] || ZSHRC_BACKUP="$bak"
+                case "$target" in
+                    "$HOME/.zshrc")    ZSHRC_BACKUP="$bak" ;;
+                    "$HOME/.zprofile") ZPROFILE_BACKUP="$bak" ;;
+                esac
             fi
         done < <(cd "$pkg" && find . -type f | sed "s|^\./|$pkg/|")
         if "$backup_failed"; then break; fi
@@ -407,13 +435,14 @@ stow_packages() {
        ! stow --target="$HOME" --restow "${STOW_PACKAGES[@]}"; then
         if [ "$backup_count" -gt 0 ]; then restore_backups "${backups[@]}"; fi
         ZSHRC_BACKUP=""
+        ZPROFILE_BACKUP=""
         return 1
     fi
 }
 
-# If a shell rc got backed up, keep whatever personal config was in it easy
-# to recover: copy it into the matching .local file with every line commented
-# out. Never overwrites an existing .local file.
+# If a shell rc (.zshrc, .zprofile) got backed up, keep whatever personal
+# config was in it easy to recover: copy it into the matching .local file with
+# every line commented out. Never overwrites an existing .local file.
 seed_local_from_backup() {
     local bak="$1" localfile="$2"
     [ -f "$bak" ] || return 0
@@ -510,6 +539,7 @@ main() {
     STOW_PACKAGES=(gitconfig gitignore nvim shell starship)
     DELTA_VERSION=0.19.2
     ZSHRC_BACKUP=""
+    ZPROFILE_BACKUP=""
 
     case "$OS" in
         Darwin) install_macos ;;
@@ -525,6 +555,7 @@ main() {
     setup_git_credential_helper
     stow_packages || return 1
     seed_local_from_backup "$ZSHRC_BACKUP" "$HOME/.zshrc.local" || return 1
+    seed_local_from_backup "$ZPROFILE_BACKUP" "$HOME/.zprofile.local" || return 1
     validate_git_signing || return 1
     info "Done."
 }

@@ -199,6 +199,49 @@ test_partial_apply_retains_backup() {
     assert test -z "$ZSHRC_BACKUP"
 }
 
+test_zprofile_backup() {
+    printf '# repo profile\n' >shell/.zprofile
+    printf 'export LOGIN_ONLY=1\n' >"$HOME/.zprofile"
+    stow_packages
+    assert test -L "$HOME/.zprofile"
+    assert test "$ZPROFILE_BACKUP" = "$HOME/.zprofile.bak"
+    assert test "$ZSHRC_BACKUP" = "$HOME/.zshrc.bak"
+    seed_local_from_backup "$ZPROFILE_BACKUP" "$HOME/.zprofile.local"
+    assert grep -qx '# export LOGIN_ONLY=1' "$HOME/.zprofile.local"
+    expect_failure grep -q 'current personal settings' "$HOME/.zprofile.local"
+}
+
+test_stow_ignored_not_backed_up() {
+    # Stow's default ignore list never links .gitignore, so backing it up
+    # would leave nothing in its place.
+    printf 'repo ignore\n' >shell/.gitignore
+    printf 'personal ignore\n' >"$HOME/.gitignore"
+    stow_packages
+    assert test -L "$HOME/.zshrc"
+    assert test ! -L "$HOME/.gitignore"
+    assert grep -qx 'personal ignore' "$HOME/.gitignore"
+    assert test ! -e "$HOME/.gitignore.bak"
+}
+
+test_credential_helper() {
+    local OS=Linux exec_dir="$HOME/git-core"
+    mkdir "$exec_dir"
+    git() {
+        if [ "$1" = --exec-path ]; then printf '%s\n' "$exec_dir"; return; fi
+        "$REAL_GIT" "$@"
+    }
+    # A hand-edited file without a trailing newline must stay valid.
+    printf '[user]\n\temail = me@example.invalid' >"$HOME/.gitconfig.local"
+    setup_git_credential_helper
+    assert test "$(git config --file "$HOME/.gitconfig.local" credential.helper)" = cache
+    assert test "$(git config --file "$HOME/.gitconfig.local" user.email)" = me@example.invalid
+    rm "$HOME/.gitconfig.local"
+    printf '#!/bin/sh\n' >"$exec_dir/git-credential-libsecret"
+    chmod +x "$exec_dir/git-credential-libsecret"
+    setup_git_credential_helper
+    assert test "$(git config --file "$HOME/.gitconfig.local" credential.helper)" = libsecret
+}
+
 test_nvim_isolation() {
     if ! command -v nvim >/dev/null 2>&1; then
         printf 'SKIP: Neovim integration (nvim unavailable)\n'
@@ -315,7 +358,8 @@ for test_name in \
     test_source_helpers test_backup_seed_and_rerun test_stale_regular_backup \
     test_seed_destinations_and_failure test_no_clobber_results \
     test_unresolved_conflict test_backup_failure_rollback test_apply_failure_rollback \
-    test_partial_apply_retains_backup test_nvim_isolation \
+    test_partial_apply_retains_backup test_zprofile_backup \
+    test_stow_ignored_not_backed_up test_credential_helper test_nvim_isolation \
     test_signing_disabled_and_old_git test_real_signing test_probe_setup_failure \
     test_main_order test_unity_optional_and_local_last; do
     (
