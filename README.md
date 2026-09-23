@@ -48,9 +48,9 @@ dotfiles/
 └── starship/
 ```
 
-Each package folder mirrors its files into `$HOME`. For example, `gitconfig/.gitconfig` becomes `~/.gitconfig`.
-
 ### Packages
+
+Each package's files are linked into `~` at the same relative path. For example, `gitconfig/.gitconfig` becomes `~/.gitconfig`.
 
 | Package | Links to | What's in it |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ Each package folder mirrors its files into `$HOME`. For example, `gitconfig/.git
 | `gitignore` | `~/.config/git/ignore` | Global Git ignore for OS and editor junk. |
 | `nvim` | `~/.config/nvim/` | LazyVim-based Neovim config. |
 | `starship` | `~/.config/starship.toml` | [Starship](https://starship.rs) prompt config (gruvbox-rainbow preset). |
-| `shell` | `~/.zshrc`, `~/.zprofile`, `~/.config/shell/` | Zsh config plus shared POSIX pieces (`env.sh`, `aliases.sh`). `.zprofile` runs `env.sh` (PATH, Homebrew) for login shells, so graphical logins and IDEs that never read `.zshrc` still find `~/.local/bin`. |
+| `shell` | `~/.zshrc`, `~/.zprofile`, `~/.config/shell/` | Zsh config plus shared POSIX pieces (`env.sh`, `aliases.sh`). `.zprofile` sets PATH for login shells and IDEs that never read `.zshrc`. |
 | `ghostty` | `~/.config/ghostty/config` | Ghostty terminal config. macOS only. |
 
 Bash is intentionally unmanaged and stays the distro default.
@@ -86,55 +86,28 @@ On Debian and Ubuntu:
 - `git-delta`, `gh`, and `zoxide` are skipped with a warning on releases that don't package them (for example Debian 11 or Ubuntu 20.04).
 - The fd binary is named `fdfind`, so the script symlinks it to `~/.local/bin/fd` (and the shell config aliases it) so `fd` works everywhere.
 
-### Shell shortcuts
-
-| Shortcut | What it does |
-| --- | --- |
-| `vim` | Opens Neovim. |
-| `..`, `...` | Go up one or two directories. |
-| `ll`, `la` | Long listing, and long listing with hidden files. |
-| `z <dir>` | Jump to a frequently used directory (zoxide). |
-| `Ctrl-R`, `Ctrl-T` | Fuzzy-search history, or fuzzy-pick a file (fzf). |
-| `<leader>gv`, `<leader>gV` | In Neovim, open Diffview, or the Diffview history of the current file. |
-
 ## Configuration
 
-Machine-specific settings live in `.local` files. They are never tracked in the repo.
+Machine-specific settings live in `.local` files, which are never tracked in the repo.
 
-| File | Required | What it does |
-| --- | --- | --- |
-| `~/.gitconfig.local` | No | Per-machine Git settings, included last so it overrides the shared config. The installer creates it with a credential helper: `osxkeychain` on macOS, `libsecret` on Linux when `git-credential-libsecret` is installed (on PATH or in `git --exec-path`), and `cache` otherwise (for example on headless servers). |
-| `~/.zshrc.local` | No | Per-machine interactive shell config, sourced last. Not created by default. |
-| `~/.zprofile.local` | No | Per-machine login environment, such as PATH additions, sourced last. Not created by default. |
-
-The shared `.gitconfig` sets these values, which you can override in `~/.gitconfig.local`:
-
-| Variable | Required | What it does |
-| --- | --- | --- |
-| `user.name`, `user.email` | Yes | Your commit identity. Defaults to the repo owner's name and GitHub noreply address. |
-| `user.signingkey` | Yes, while signing is on | The key used to sign commits. Defaults to `~/.ssh/id_ed25519.pub`. |
-| `gpg.format` | No | The signing format. Defaults to `ssh`. |
-| `commit.gpgsign` | No | Signs every commit. Defaults to `true`. |
-| `core.pager` | No | The pager for diffs and logs. Defaults to `delta`. |
-| `core.editor` | No | The editor for commit messages. Defaults to `nvim`. |
-
-> [!WARNING]
-> If you're not the repo owner, set your own `user.name` and `user.email` in `~/.gitconfig.local` before committing. Otherwise your commits are attributed to someone else.
+| File | What it does |
+| --- | --- |
+| `~/.gitconfig.local` | Per-machine Git settings, included last so it overrides the shared config. Use it for a different signing key or your own name and email. The installer creates it with a credential helper: `osxkeychain` on macOS, `libsecret` on Linux when `git-credential-libsecret` is installed (on PATH or in `git --exec-path`), and `cache` otherwise (for example on headless servers). |
+| `~/.zshrc.local` | Per-machine interactive shell config, sourced last. Not created by default. |
+| `~/.zprofile.local` | Per-machine login environment, such as PATH additions, sourced last. Not created by default. |
 
 ### Git signing
 
-Commits are signed with SSH using `~/.ssh/id_ed25519.pub`. This requires Git 2.34 or newer and access to the matching private key, normally loaded into your SSH agent. The Git version requirement doesn't apply if you switch to OpenPGP.
+Commits are signed with SSH using `~/.ssh/id_ed25519.pub`. This requires Git 2.34 or newer (not needed if you switch to OpenPGP) and the matching private key, normally loaded into your SSH agent.
 
-After linking the configs, the installer makes a test signature in a temporary repository. Your agent may ask for a passphrase, a security-key touch, or an approval at this point. If the check fails, the installer exits with **configs installed; signing setup incomplete**. Your configs stay in place: follow the message, make the key available to your agent, and re-run.
-
-The installer never generates keys or turns signing off for you. To skip the check, set `commit.gpgsign = false` in `~/.gitconfig.local`.
+At the end of a run, the installer makes a test signature, so your agent may ask for a passphrase, a security-key touch, or an approval. If it fails, the installer exits with **configs installed; signing setup incomplete**. Your configs stay in place: make the key available to your agent and re-run. The installer never generates keys or turns signing off. To skip the check, set `commit.gpgsign = false` in `~/.gitconfig.local`.
 
 ### Adding your own shell config
 
 - **Every machine:** edit `shell/.zshrc` (or the shared `shell/.config/shell/*.sh`) in the repo and commit.
 - **Just this machine:** put it in `~/.zshrc.local`, or in `~/.zprofile.local` for login-only environment such as PATH additions.
 
-Because `~/.zshrc` is a symlink into the repo, installers that append to it (rustup, nvm, conda, Unity, and so on) write into the repo file. `git diff` shows exactly what they added. Commit it if it belongs on every machine, or move it to the `.local` file if not. The repo config already sources `~/.cargo/env` and `~/.unity/env` when present, so you can drop duplicate lines those installers add.
+Because `~/.zshrc` is a symlink into the repo, installers that append to it (rustup, nvm, conda, Unity, and so on) write into the repo file. Check `git diff` before committing: commit what belongs on every machine, and move machine-specific paths or tokens to the `.local` file. The repo config already sources `~/.cargo/env` and `~/.unity/env` when present, so you can drop duplicate lines those installers add.
 
 If the installer had to back up an existing `.zshrc` or `.zprofile`, it copies that backup into `~/.zshrc.local` or `~/.zprofile.local` with every line commented out and owner-only (`0600`) permissions. Review it and uncomment anything you want to keep. An existing `.local` file is never overwritten.
 
@@ -168,9 +141,7 @@ The configs are symlinks, so changes to existing files apply as soon as you pull
 
 ### Backups
 
-When a regular file is in the way of a link, the installer moves it to `<file>.bak`, or `<file>.bak.<timestamp>` if that name is taken. Existing backups are never overwritten.
-
-Stow is tested with a dry run before anything changes. If linking fails, the installer puts this run's backups back where the original path is still free. Otherwise it keeps the backup and prints both paths so you can recover by hand. Package installs are not rolled back, and an interrupted run may also need manual recovery.
+When a regular file is in the way of a link, the installer moves it to `<file>.bak` (or `<file>.bak.<timestamp>` if that name is taken) and never overwrites an existing backup. If linking fails, it puts this run's backups back, or keeps them and prints both paths so you can recover by hand. Package installs are not rolled back, and an interrupted run may need manual recovery.
 
 ### Removing a package
 
@@ -178,11 +149,6 @@ Stow is tested with a dry run before anything changes. If linking fails, the ins
 cd ~/dotfiles        # enter the repo
 stow -D nvim         # remove the links for one package (here, nvim)
 ```
-
-### Security
-
-- Review `git diff` before committing `shell/.zshrc`. Tool installers that append to it can add machine-specific paths or tokens that shouldn't be pushed.
-- Keep secrets and work-only settings in the `.local` files. The repo's `.gitignore` excludes `*.local`.
 
 ## Development
 
