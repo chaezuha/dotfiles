@@ -1,89 +1,196 @@
 # My dotfiles
 
-Some of my configs, managed with [GNU Stow](https://www.gnu.org/software/stow/).
+My shell, Git, Neovim, and terminal configs, managed with [GNU Stow](https://www.gnu.org/software/stow/). One script installs the tools and links the configs into your home directory on macOS and the major Linux distros.
 
-## General structure
+## Features
 
-The top-level folders are Stow packages that get mirrored into `$HOME`.
+- **One-command setup:** `./install.sh` installs the packages, a Nerd Font, and the configs on macOS, Fedora/RHEL, Ubuntu, Debian, and Arch. It's safe to re-run.
+- **Zsh everywhere:** Shared history, case-insensitive completion, autosuggestions, syntax highlighting, fzf key bindings, and zoxide. On Linux, zsh becomes your login shell.
+- **Starship prompt:** The gruvbox-rainbow preset, with a plain prompt as a fallback when starship isn't installed.
+- **Neovim with LazyVim:** Catppuccin Mocha, language support for C/C++, Python, Rust, Java, TypeScript, and more, format-on-save, and Diffview.
+- **Git defaults:** delta as the pager, Neovim as the editor, SSH commit signing, rebase on pull, and pruning on fetch.
+- **Terminal and font:** JetBrainsMono Nerd Font everywhere. Ghostty on macOS, and the Ptyxis font is set on Linux if you use it.
+- **Per-machine overrides:** Untracked `.local` files for anything that belongs to one machine only, such as a work email or extra PATH entries.
+- **Your old configs are kept:** Existing files that would be replaced are backed up first, and your old `.zshrc` and `.zprofile` are copied into the `.local` files for review.
 
-For example: `gitconfig/.gitconfig` → `~/.gitconfig`
+## Quick start
 
-## Setup
+Prerequisites: Git, Homebrew on macOS, `sudo` on Linux, and an SSH key at `~/.ssh/id_ed25519` loaded into your SSH agent (used for [commit signing](#git-signing)).
 
-Clone the repo and run the install script:
+1. Clone the repo and run the installer:
 
-```sh
-git clone <repo-url> ~/dotfiles
-cd ~/dotfiles
-./install.sh
+   ```sh
+   git clone https://github.com/chaezuha/dotfiles.git ~/dotfiles  # clone the repo
+   cd ~/dotfiles                                                  # enter it
+   ./install.sh                                                   # install packages and link the configs
+   ```
+
+2. Open a new terminal. On Linux, log out and back in so zsh becomes your login shell.
+
+That's it. Run `nvim` next: LazyVim installs its plugins on the first launch.
+
+> If the installer ends with **configs installed; signing setup incomplete**, your configs are in place but Git can't sign with your key. Load the key into your agent (`ssh-add ~/.ssh/id_ed25519`), or set a different key in `~/.gitconfig.local`, then re-run `./install.sh`. See [Git signing](#git-signing).
+
+## Usage
+
+### Project structure
+
+```
+dotfiles/
+├── install.sh    # the installer
+├── tests/        # installer tests
+├── .stowrc       # makes stow target your home directory
+├── gitconfig/    # Stow packages: each one is mirrored into ~
+├── gitignore/
+├── ghostty/
+├── nvim/
+├── shell/
+└── starship/
 ```
 
-The script installs the needed packages (git, stow, neovim, zsh, fzf, zoxide, git-delta, starship, ...) with the platform's package manager, installs the JetBrainsMono Nerd Font, then stows the packages. Where a tool isn't packaged (RHEL, older Debian/Ubuntu) the script falls back to installing it under `~/.local`: starship via its [official installer](https://starship.rs/guide/), git-delta from its GitHub release, and Neovim from the official release tarball whenever the packaged build is older than the 0.11.2 LazyVim needs. Supported platforms:
+Each package folder mirrors its files into `$HOME`. For example, `gitconfig/.gitconfig` becomes `~/.gitconfig`.
 
-- **macOS** (Homebrew, must already be installed). Also installs Ghostty
-- **Fedora** / RHEL-family (dnf). On RHEL-family systems the script enables EPEL first (the `epel-release` package, or on RHEL itself the release RPM from the Fedora project). Only stow is required from it: other packages that still aren't available get skipped with a warning instead of failing the run. Neovim falls back to the release tarball, tree-sitter-cli is installed through npm instead, and for gh it prints the GitHub repo to add
-- **Ubuntu** (apt, with Neovim from `ppa:neovim-ppa/unstable`)
-- **Debian** (apt)
+### Packages
 
-On Debian and Ubuntu, `git-delta`, `gh` and `zoxide` are skipped with a warning on releases that don't package them (e.g. Debian 11, Ubuntu 20.04).
-- **Arch** (pacman)
+| Package | Links to | What's in it |
+| --- | --- | --- |
+| `gitconfig` | `~/.gitconfig` | Shared Git config (delta as pager, nvim as editor, SSH signing). |
+| `gitignore` | `~/.config/git/ignore` | Global Git ignore for OS and editor junk. |
+| `nvim` | `~/.config/nvim/` | LazyVim-based Neovim config. |
+| `starship` | `~/.config/starship.toml` | [Starship](https://starship.rs) prompt config (gruvbox-rainbow preset). |
+| `shell` | `~/.zshrc`, `~/.zprofile`, `~/.config/shell/` | Zsh config plus shared POSIX pieces (`env.sh`, `aliases.sh`). `.zprofile` runs `env.sh` (PATH, Homebrew) for login shells, so graphical logins and IDEs that never read `.zshrc` still find `~/.local/bin`. |
+| `ghostty` | `~/.config/ghostty/config` | Ghostty terminal config. macOS only. |
 
-Since Debian and Ubuntu name the fd binary `fdfind`, the script symlinks it to `~/.local/bin/fd` (and the shell config aliases it) so `fd` works everywhere.
+Bash is intentionally unmanaged and stays the distro default.
 
-Ghostty is only installed (and its config only stowed) on macOS. On Linux, the font is installed to `~/.local/share/fonts` and, if [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) is present, its font is set via gsettings. Zsh is the shell everywhere: the plugins (`zsh-autosuggestions`, `zsh-syntax-highlighting`) come from Homebrew on macOS and from the distro packages on Linux, where the script also installs zsh itself and switches the login shell to it (`sudo chsh`).
+### What the installer does
 
-Conflicting regular config files are backed up to `<file>.bak`, or `<file>.bak.<timestamp>` with a numeric suffix if needed. Existing backups, including dangling symlinks, are never overwritten. Stow is checked before applying changes. On a detected failure, the script restores this run's backups wherever the original path is still absent. If a destination is occupied (including by a symlink), it keeps the backup and prints both paths for manual recovery. Interruptions may also require manual recovery; package installations are not rolled back. Successful installs are safe to re-run.
+The installer installs the needed packages (git, stow, neovim, zsh, fzf, zoxide, git-delta, starship, and more) with your platform's package manager, installs the JetBrainsMono Nerd Font, then stows the packages.
+
+| Platform | Package manager | Differences |
+| --- | --- | --- |
+| macOS | Homebrew | Homebrew must already be installed. Also installs Ghostty and stows its config. |
+| Fedora / RHEL family | dnf | On RHEL-family systems, EPEL is enabled first (the `epel-release` package, or on RHEL itself the release RPM from the Fedora project). Only stow is required from it. Other missing packages are skipped with a warning. tree-sitter-cli comes from npm, and for gh the script prints the GitHub repo to add. |
+| Ubuntu | apt | Neovim comes from `ppa:neovim-ppa/unstable`. |
+| Debian | apt | |
+| Arch | pacman | |
+
+On every Linux distro, the installer also:
+
+- Installs zsh and switches your login shell to it (`sudo chsh`). The zsh plugins (`zsh-autosuggestions`, `zsh-syntax-highlighting`) come from the distro packages. On macOS they come from Homebrew.
+- Installs the font to `~/.local/share/fonts` and, if [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) is present, sets its font with gsettings.
+- Installs tools under `~/.local` when the distro doesn't package them: starship with its [official installer](https://starship.rs/guide/), git-delta from its GitHub release, and Neovim from the official release tarball whenever the packaged build is older than the 0.11.2 that LazyVim needs. If delta can't be installed at all, Git's pager is set back to `less` in `~/.gitconfig.local`.
+
+On Debian and Ubuntu:
+
+- `git-delta`, `gh`, and `zoxide` are skipped with a warning on releases that don't package them (for example Debian 11 or Ubuntu 20.04).
+- The fd binary is named `fdfind`, so the script symlinks it to `~/.local/bin/fd` (and the shell config aliases it) so `fd` works everywhere.
+
+### Shell shortcuts
+
+| Shortcut | What it does |
+| --- | --- |
+| `vim` | Opens Neovim. |
+| `..`, `...` | Go up one or two directories. |
+| `ll`, `la` | Long listing, and long listing with hidden files. |
+| `z <dir>` | Jump to a frequently used directory (zoxide). |
+| `Ctrl-R`, `Ctrl-T` | Fuzzy-search history, or fuzzy-pick a file (fzf). |
+| `<leader>gv`, `<leader>gV` | In Neovim, open Diffview, or the Diffview history of the current file. |
+
+## Configuration
+
+Machine-specific settings live in `.local` files. They are never tracked in the repo.
+
+| File | Required | What it does |
+| --- | --- | --- |
+| `~/.gitconfig.local` | No | Per-machine Git settings, included last so it overrides the shared config. The installer creates it with a credential helper: `osxkeychain` on macOS, `libsecret` on Linux when `git-credential-libsecret` is installed (on PATH or in `git --exec-path`), and `cache` otherwise (for example on headless servers). |
+| `~/.zshrc.local` | No | Per-machine interactive shell config, sourced last. Not created by default. |
+| `~/.zprofile.local` | No | Per-machine login environment, such as PATH additions, sourced last. Not created by default. |
+
+The shared `.gitconfig` sets these values, which you can override in `~/.gitconfig.local`:
+
+| Variable | Required | What it does |
+| --- | --- | --- |
+| `user.name`, `user.email` | Yes | Your commit identity. Defaults to the repo owner's name and GitHub noreply address. |
+| `user.signingkey` | Yes, while signing is on | The key used to sign commits. Defaults to `~/.ssh/id_ed25519.pub`. |
+| `gpg.format` | No | The signing format. Defaults to `ssh`. |
+| `commit.gpgsign` | No | Signs every commit. Defaults to `true`. |
+| `core.pager` | No | The pager for diffs and logs. Defaults to `delta`. |
+| `core.editor` | No | The editor for commit messages. Defaults to `nvim`. |
+
+> [!WARNING]
+> If you're not the repo owner, set your own `user.name` and `user.email` in `~/.gitconfig.local` before committing. Otherwise your commits are attributed to someone else.
 
 ### Git signing
 
-The shared config enables SSH commit signing with `~/.ssh/id_ed25519.pub`. This requires Git 2.34 or newer and access to the corresponding signing key (normally loaded into your SSH agent). Configure a different key or signing format in `~/.gitconfig.local` when needed.
+Commits are signed with SSH using `~/.ssh/id_ed25519.pub`. This requires Git 2.34 or newer and access to the matching private key, normally loaded into your SSH agent. The Git version requirement doesn't apply if you switch to OpenPGP.
 
-After installing and seeding the configs, the installer checks signing using a temporary repository. It announces the check because your agent may request a passphrase, security-key touch, or approval. If validation fails, it exits non-zero with **configs installed; signing setup incomplete**: the installed configs remain in place. Follow the diagnostic, make the key available to your agent, and re-run. The installer never generates keys or disables signing automatically; an explicit local `commit.gpgsign = false` skips validation. The SSH Git-version requirement does not apply to an OpenPGP override.
+After linking the configs, the installer makes a test signature in a temporary repository. Your agent may ask for a passphrase, a security-key touch, or an approval at this point. If the check fails, the installer exits with **configs installed; signing setup incomplete**. Your configs stay in place: follow the message, make the key available to your agent, and re-run.
 
-### Manual setup
+The installer never generates keys or turns signing off for you. To skip the check, set `commit.gpgsign = false` in `~/.gitconfig.local`.
 
-1. Install Stow
-2. Clone this repo to the desired folder
-3. Run `stow <foldername>` for each desired package (skip `ghostty` on Linux)
+### Adding your own shell config
 
-## Packages
+- **Every machine:** edit `shell/.zshrc` (or the shared `shell/.config/shell/*.sh`) in the repo and commit.
+- **Just this machine:** put it in `~/.zshrc.local`, or in `~/.zprofile.local` for login-only environment such as PATH additions.
 
-- **`gitconfig`**: shared `~/.gitconfig` (delta as pager, nvim as editor)
-- **`gitignore`**: global git ignore at `~/.config/git/ignore` (OS/editor junk)
-- **`nvim`**: LazyVim-based Neovim config
-- **`starship`**: [starship](https://starship.rs) prompt config at `~/.config/starship.toml` (gruvbox-rainbow preset). The zsh config only inits starship when the binary exists and falls back to a plain prompt otherwise
-- **`shell`**: `~/.zshrc`, `~/.zprofile`, and the shared POSIX pieces (`env.sh`, `aliases.sh`) in `~/.config/shell/`. `.zprofile` runs `env.sh` (PATH, Homebrew) for login shells, so graphical logins and IDEs that never read `.zshrc` still find `~/.local/bin`. Bash is intentionally unmanaged and stays the distro default
-- **`ghostty`**: Ghostty terminal config (macOS only)
+Because `~/.zshrc` is a symlink into the repo, installers that append to it (rustup, nvm, conda, Unity, and so on) write into the repo file. `git diff` shows exactly what they added. Commit it if it belongs on every machine, or move it to the `.local` file if not. The repo config already sources `~/.cargo/env` and `~/.unity/env` when present, so you can drop duplicate lines those installers add.
 
-## Machine-specific overrides
+If the installer had to back up an existing `.zshrc` or `.zprofile`, it copies that backup into `~/.zshrc.local` or `~/.zprofile.local` with every line commented out and owner-only (`0600`) permissions. Review it and uncomment anything you want to keep. An existing `.local` file is never overwritten.
 
-`~/.gitconfig.local` is included from the shared `.gitconfig` but not tracked in this repo. The install script creates it with the platform-appropriate credential helper:
+## Other ways to run
 
-- macOS → `osxkeychain`
-- Linux with `git-credential-libsecret` installed (on PATH or in `git --exec-path`) → `libsecret`
-- other Linux (e.g. headless servers) → `cache`
+### Manual setup with Stow
 
-It's also the place for any other per-machine overrides (work email, etc.).
+Use this to pick individual packages, or on a distro the installer doesn't support.
 
-The shell config works the same way: `~/.zshrc.local` and `~/.zprofile.local` are sourced last (if they exist) and never tracked in the repo.
-
-## Adding your own shell config
-
-- **Every machine**: edit `shell/.zshrc` (or the shared `shell/.config/shell/*.sh`) in the repo and commit.
-- **Just this machine**: put it in `~/.zshrc.local` (or `~/.zprofile.local` for login-only environment such as PATH additions). Sourced last, never tracked.
-
-Because `~/.zshrc` is a symlink into the repo, installers that append to it (rustup, nvm, conda, Unity, ...) write into the repo file, so `git diff` shows exactly what they added. Commit it if it belongs everywhere, or move it to the `.local` file if not. The repo config already sources `~/.cargo/env` and `~/.unity/env` when present, before local overrides. Review additions from future tool installers for duplicates or machine-specific paths.
-
-After a successful Stow run, the installer copies the `.zshrc` and `.zprofile` backups made by that run into `~/.zshrc.local` and `~/.zprofile.local`, with every line commented out and owner-only (`0600`) permissions. This uses the actual backup path, including a timestamp or suffix; historical backups are never used on reruns. Review it and uncomment anything personal you want to keep. An existing `.local` file, including a dangling symlink, is always preserved.
-
-## Verification
-
-Run `bash tests/install_test.sh` with Git, Stow, and OpenSSH installed. The suite uses temporary homes, fixture packages, and a throwaway SSH agent; it does not install packages or use your signing keys. Neovim and Zsh integration checks are skipped explicitly if those executables are unavailable. On macOS, `/bin/bash tests/install_test.sh` also checks compatibility with Bash 3.2.
-
-## Notes
-
-To remove a package's symlinks:
+1. Install Stow. On an unsupported distro, also install git, neovim, node, ripgrep, fd, tree-sitter, gh, python3, starship, zsh (plus zsh-autosuggestions and zsh-syntax-highlighting), and a C compiler.
+2. Clone the repo and stow the packages you want. The repo's `.stowrc` targets your home directory, so this works from any clone location. Skip `ghostty` on Linux.
 
 ```sh
-stow -D <foldername>
+git clone https://github.com/chaezuha/dotfiles.git ~/dotfiles  # clone the repo
+cd ~/dotfiles                                                  # enter it
+stow gitconfig gitignore nvim shell starship                   # link the packages you want
+stow ghostty                                                   # macOS only
 ```
+
+## Running it long-term
+
+### Updating
+
+```sh
+cd ~/dotfiles   # enter the repo
+git pull        # get the latest configs
+./install.sh    # install any new packages and links
+```
+
+The configs are symlinks, so changes to existing files apply as soon as you pull. Open a new shell (or run `exec zsh`) to load shell changes.
+
+### Backups
+
+When a regular file is in the way of a link, the installer moves it to `<file>.bak`, or `<file>.bak.<timestamp>` if that name is taken. Existing backups are never overwritten.
+
+Stow is tested with a dry run before anything changes. If linking fails, the installer puts this run's backups back where the original path is still free. Otherwise it keeps the backup and prints both paths so you can recover by hand. Package installs are not rolled back, and an interrupted run may also need manual recovery.
+
+### Removing a package
+
+```sh
+cd ~/dotfiles        # enter the repo
+stow -D nvim         # remove the links for one package (here, nvim)
+```
+
+### Security
+
+- Review `git diff` before committing `shell/.zshrc`. Tool installers that append to it can add machine-specific paths or tokens that shouldn't be pushed.
+- Keep secrets and work-only settings in the `.local` files. The repo's `.gitignore` excludes `*.local`.
+
+## Development
+
+Run the test suite with Git, Stow, and OpenSSH installed:
+
+```sh
+bash tests/install_test.sh       # run the installer tests
+/bin/bash tests/install_test.sh  # macOS: also check Bash 3.2 compatibility
+```
+
+The suite uses temporary home directories, fixture packages, and a throwaway SSH agent. It doesn't install packages or use your signing keys. The Neovim and Zsh checks are skipped, with a message, if those programs aren't installed.
