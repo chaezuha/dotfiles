@@ -50,9 +50,6 @@ if command -v fzf >/dev/null 2>&1; then
     unset _fzf_init
 fi
 
-# Unity CLI (optional, like the Rust toolchain above).
-[ -f "$HOME/.unity/env" ] && . "$HOME/.unity/env"
-
 # --- Plugins ---
 # Sourced only if installed (brew on macOS, distro packages on Linux).
 _source_first() {

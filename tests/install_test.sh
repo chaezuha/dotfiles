@@ -324,9 +324,9 @@ test_main_order() {
     assert cmp "$HOME/expected" "$events"
 }
 
-test_unity_optional_and_local_last() {
+test_zshrc_sources_local() {
     if ! command -v zsh >/dev/null 2>&1; then
-        printf 'SKIP: Unity integration (zsh unavailable)\n'
+        printf 'SKIP: zshrc load check (zsh unavailable)\n'
         return
     fi
     # Isolate the tools/plugins outside the config under test.
@@ -339,19 +339,11 @@ function '['() {
     builtin [ "$@"
 }
 source "$1"
-[[ "$UNITY_TEST" == local ]] || exit 1
+[[ "$LOCAL_TEST" == local ]] || exit 1
 ZSH
-    printf 'UNITY_TEST=local\n' >"$HOME/.zshrc.local"
+    printf 'LOCAL_TEST=local\n' >"$HOME/.zshrc.local"
     zsh -f "$HOME/check.zsh" "$REPO/shell/.zshrc" 2>"$HOME/zsh.log"
     assert test ! -s "$HOME/zsh.log"
-    mkdir "$HOME/.unity"
-    cat >"$HOME/.unity/env" <<'UNITY'
-UNITY_TEST=unity
-printf loaded >"$HOME/unity-marker"
-UNITY
-    zsh -f "$HOME/check.zsh" "$REPO/shell/.zshrc" 2>"$HOME/zsh.log"
-    assert test ! -s "$HOME/zsh.log"
-    assert test -f "$HOME/unity-marker"
 }
 
 for test_name in \
@@ -361,7 +353,7 @@ for test_name in \
     test_partial_apply_retains_backup test_zprofile_backup \
     test_stow_ignored_not_backed_up test_credential_helper test_nvim_isolation \
     test_signing_disabled_and_old_git test_real_signing test_probe_setup_failure \
-    test_main_order test_unity_optional_and_local_last; do
+    test_main_order test_zshrc_sources_local; do
     (
         fixture "$test_name"
         "$test_name"
