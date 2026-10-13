@@ -22,6 +22,10 @@ I sign commits with my SSH key, and the script does a test signature at the end.
 
 ## What's in here
 
+Each top-level folder is a stow package, and whatever's inside it gets symlinked into `~` at the same path. So `nvim/.config/nvim/init.lua` ends up at `~/.config/nvim/init.lua`. `.stowrc` points stow at `~`, so it works from wherever the repo is cloned.
+
+To add a new one, make a folder that mirrors the home-dir path (e.g. `tmux/.config/tmux/tmux.conf`), then `stow tmux`. Add it to `STOW_PACKAGES` in `install.sh` so the installer picks it up too.
+
 | Package | Goes to | |
 | --- | --- | --- |
 | `shell` | `~/.zshrc`, `~/.zprofile`, `~/.config/shell/` | zsh with autosuggestions, syntax highlighting, fzf, zoxide |
