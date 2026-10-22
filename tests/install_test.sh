@@ -416,6 +416,37 @@ test_ostree_host_main() {
     assert cmp "$HOME/expected" "$events"
 }
 
+test_nerd_font_prunes_extra_faces() {
+    local fontdir="$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
+    mkdir -p "$fontdir"
+    touch "$fontdir/JetBrainsMonoNerdFont-Regular.ttf" \
+        "$fontdir/JetBrainsMonoNerdFont-ThinItalic.ttf" \
+        "$fontdir/JetBrainsMonoNerdFontMono-Regular.ttf"
+    fc-list() { printf '%s: JetBrainsMono Nerd Font:style=Regular\n' "$fontdir/JetBrainsMonoNerdFont-Regular.ttf"; }
+    fc-cache() { printf 'cache %s\n' "$*" >>"$HOME/events"; }
+    curl() { forbidden curl "$@"; }
+    install_nerd_font_linux >/dev/null
+    assert test ! -e "$HOME/forbidden"
+    assert test "$(ls "$fontdir")" = JetBrainsMonoNerdFont-Regular.ttf
+    printf 'cache -f %s\n' "$fontdir" >"$HOME/expected"
+    assert cmp "$HOME/expected" "$HOME/events"
+}
+
+test_nerd_font_installs_four_faces() {
+    local fontdir="$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
+    fc-list() { :; }
+    fc-cache() { :; }
+    curl() { touch "$3"; }
+    unzip() { printf '%s\n' "$@" >"$HOME/unzip-args"; }
+    install_nerd_font_linux >/dev/null
+    printf '%s\n' -oq JetBrainsMono.zip \
+        JetBrainsMonoNerdFont-Regular.ttf JetBrainsMonoNerdFont-Bold.ttf \
+        JetBrainsMonoNerdFont-Italic.ttf JetBrainsMonoNerdFont-BoldItalic.ttf \
+        -d "$fontdir" >"$HOME/expected"
+    sed 's|^.*/JetBrainsMono.zip$|JetBrainsMono.zip|' "$HOME/unzip-args" >"$HOME/actual"
+    assert cmp "$HOME/expected" "$HOME/actual"
+}
+
 test_distrobox_main_modes() {
     local events="$HOME/events"
     uname() { printf 'Linux\n'; }
@@ -657,7 +688,9 @@ for test_name in \
     test_stow_ignored_not_backed_up test_credential_helper test_nvim_isolation \
     test_signing_disabled_and_old_git test_real_signing test_probe_setup_failure \
     test_main_order test_zshrc_sources_local \
-    test_detect_environment test_ostree_host_main test_distrobox_main_modes \
+    test_detect_environment test_ostree_host_main \
+    test_nerd_font_prunes_extra_faces test_nerd_font_installs_four_faces \
+    test_distrobox_main_modes \
     test_box_home_links test_export_nvim test_assemble_wrapper \
     test_env_drops_host_bin_in_own_box test_host_script_refuses; do
     (

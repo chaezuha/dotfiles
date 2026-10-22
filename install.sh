@@ -268,9 +268,27 @@ install_linux() {
 # On macOS the font comes from a Homebrew cask; on Linux, download the
 # nerd-fonts release into the user font directory.
 install_nerd_font_linux() {
+    # Only the four faces a terminal uses. The release also ships Thin through
+    # ExtraBold under the same family name, and with those installed Pango can
+    # resolve 'JetBrainsMono Nerd Font' to an italic face.
+    local faces fontdir="$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
+    faces=(JetBrainsMonoNerdFont-{Regular,Bold,Italic,BoldItalic}.ttf)
     if ! command -v fc-list >/dev/null 2>&1; then
         warn "fontconfig not installed; skipping JetBrainsMono Nerd Font install."
         return
+    fi
+    # Earlier runs unzipped the whole release here; drop the extra faces.
+    if [ -d "$fontdir" ]; then
+        local face keep removed
+        keep=()
+        for face in "${faces[@]}"; do
+            keep+=(! -name "$face")
+        done
+        removed="$(find "$fontdir" -type f "${keep[@]}" -print -delete)"
+        if [ -n "$removed" ]; then
+            info "Removed extra JetBrainsMono Nerd Font styles"
+            fc-cache -f "$fontdir"
+        fi
     fi
     # Plain grep (not -q) reads all of fc-list's output. grep -q exits at the
     # first match, which can kill fc-list with SIGPIPE and, under pipefail,
@@ -281,12 +299,11 @@ install_nerd_font_linux() {
     fi
 
     info "Installing JetBrainsMono Nerd Font to ~/.local/share/fonts"
-    local tmp fontdir
+    local tmp
     tmp="$(mktemp -d)"
-    fontdir="$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
     if ! curl -fsSL -o "$tmp/JetBrainsMono.zip" \
             "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip" ||
-       ! { mkdir -p "$fontdir" && unzip -oq "$tmp/JetBrainsMono.zip" -d "$fontdir"; }; then
+       ! { mkdir -p "$fontdir" && unzip -oq "$tmp/JetBrainsMono.zip" "${faces[@]}" -d "$fontdir"; }; then
         warn "JetBrainsMono Nerd Font download failed; prompt icons may not render." \
              "Install it later from https://www.nerdfonts.com/font-downloads"
         rm -rf "$tmp"
