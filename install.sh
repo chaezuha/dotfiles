@@ -55,7 +55,7 @@ install_fedora() {
         die "stow is required but not available from dnf. On RHEL-family systems it comes from EPEL:" \
             "https://docs.fedoraproject.org/en-US/epel/ (enable it, then re-run)."
 
-    # In the Fedora repos, but not in RHEL/EPEL.
+    # Not in the official Fedora or RHEL/EPEL repos, but try in case a repo provides it.
     sudo dnf install -y starship 2>/dev/null || install_starship_fallback
 
     if ! command -v tree-sitter >/dev/null 2>&1; then
@@ -80,7 +80,7 @@ install_apt_optional() {
     done
 }
 
-# starship is in the Fedora and Arch repos but not in RHEL/EPEL and only in
+# starship is in the Arch repos but not in Fedora (COPR only), RHEL/EPEL, and only in
 # the newest Debian/Ubuntu releases; fall back to the official installer,
 # which drops a single binary into ~/.local/bin (already first on PATH).
 install_starship_fallback() {
@@ -88,6 +88,8 @@ install_starship_fallback() {
         return
     fi
     info "starship not available from the package manager; using the official installer"
+    # The installer refuses a -b directory that doesn't exist yet (fresh installs).
+    mkdir -p "$HOME/.local/bin"
     curl -sS https://starship.rs/install.sh | sh -s -- -y -b "$HOME/.local/bin" ||
         warn "starship install failed; the shell config falls back to a plain prompt."
 }
