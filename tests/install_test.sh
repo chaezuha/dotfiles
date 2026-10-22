@@ -585,12 +585,12 @@ test_assemble_wrapper() {
     local script="$REPO/silverblue/assemble.sh" manifest="$REPO/distrobox.ini"
     local before home tmp
     mkdir "$HOME/bin"
-    export AUDIT_DBX_LOG="$HOME/dbx.log" AUDIT_DBX_COPY="$HOME/dbx.ini"
+    export AUDIT_DISTROBOX_LOG="$HOME/distrobox.log" AUDIT_DISTROBOX_COPY="$HOME/distrobox.ini"
     cat >"$HOME/bin/distrobox" <<'STUB'
 #!/bin/sh
-printf '%s\n' "$*" >"$AUDIT_DBX_LOG"
+printf '%s\n' "$*" >"$AUDIT_DISTROBOX_LOG"
 while [ $# -gt 0 ]; do
-    if [ "$1" = --file ]; then cp "$2" "$AUDIT_DBX_COPY"; fi
+    if [ "$1" = --file ]; then cp "$2" "$AUDIT_DISTROBOX_COPY"; fi
     shift
 done
 STUB
@@ -599,15 +599,15 @@ STUB
     before="$(cksum <"$manifest")"
 
     for home in /home/harley /var/home/harley; do
-        rm -f "$AUDIT_DBX_LOG" "$AUDIT_DBX_COPY"
+        rm -f "$AUDIT_DISTROBOX_LOG" "$AUDIT_DISTROBOX_COPY"
         HOME="$home" "$BASH" "$script" --replace
-        assert grep -qx "home=$home/dbx/dev" "$AUDIT_DBX_COPY"
-        expect_failure grep -q '@HOME@' "$AUDIT_DBX_COPY"
-        tmp="$(sed -n 's/^assemble create --file \(.*\) --replace$/\1/p' "$AUDIT_DBX_LOG")"
+        assert grep -qx "home=$home/distrobox/dev" "$AUDIT_DISTROBOX_COPY"
+        expect_failure grep -q '@HOME@' "$AUDIT_DISTROBOX_COPY"
+        tmp="$(sed -n 's/^assemble create --file \(.*\) --replace$/\1/p' "$AUDIT_DISTROBOX_LOG")"
         assert test -n "$tmp"
         assert test ! -e "$tmp"
     done
-    rm -f "$AUDIT_DBX_LOG"
+    rm -f "$AUDIT_DISTROBOX_LOG"
 
     # Unsafe homes fail before a manifest is written or distrobox runs.
     # shellcheck disable=SC2016 # literal $ on purpose
@@ -621,12 +621,12 @@ STUB
     # In a UTF-8 locale A-Za-z can match accented letters; the check must not.
     expect_failure env LC_ALL=en_US.UTF-8 HOME=/home/hárley "$BASH" "$script" 2>"$HOME/err.log"
     assert grep -F 'Unsupported home path' "$HOME/err.log"
-    assert test ! -e "$AUDIT_DBX_LOG"
+    assert test ! -e "$AUDIT_DISTROBOX_LOG"
     assert test -z "$(find "$TMPDIR" -name 'distrobox.*')"
 
     expect_failure env CONTAINER_ID=main HOME=/home/harley "$BASH" "$script" 2>"$HOME/err.log"
     assert grep -F 'not inside a distrobox' "$HOME/err.log"
-    assert test ! -e "$AUDIT_DBX_LOG"
+    assert test ! -e "$AUDIT_DISTROBOX_LOG"
 
     # A bare PATH, so a real distrobox on this machine is never run.
     expect_failure env PATH="$(bare_path dirname)" HOME=/home/harley "$BASH" "$script" 2>"$HOME/err.log"

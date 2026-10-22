@@ -65,7 +65,7 @@ Shell changes for every machine go in `shell/.zshrc` (or `shell/.config/shell/*.
 The host is immutable, so I keep it nearly bare (bash, distrobox, the font) and do everything else in two [distroboxes](https://distrobox.it/), defined in `distrobox.ini`:
 
 - **`main`** is the daily driver. It shares the real home, so it behaves like a normal install.
-- **`dev`** is for programming languages. It gets its own home at `~/dbx/dev`, so all the `~/.cargo`, `~/.npm`, `~/.gradle` junk stays out of the real one. Deleting the box and that folder wipes it completely.
+- **`dev`** is for programming languages. It gets its own home at `~/distrobox/dev`, so all the `~/.cargo`, `~/.npm`, `~/.gradle` junk stays out of the real one. Deleting the box and that folder wipes it completely.
 
 Setting it up goes:
 
@@ -75,7 +75,7 @@ Setting it up goes:
 4. In `dev`, run `"$DISTROBOX_HOST_HOME/dotfiles/install.sh"`, because `~/dotfiles` isn't linked into `dev` until that first run.
 5. In Ptyxis, make profiles with the custom commands `distrobox enter main` and `distrobox enter dev`. Ptyxis's own container menu can open a non-login shell, which skips the config.
 
-To move the boxes to a new Fedora release, rebuild them instead of upgrading in place: `./silverblue/assemble.sh --replace`, then re-run `install.sh` in each one. A rebuild wipes the packages but keeps the home (and `~/dbx/dev`).
+To move the boxes to a new Fedora release, rebuild them instead of upgrading in place: `./silverblue/assemble.sh --replace`, then re-run `install.sh` in each one. A rebuild wipes the packages but keeps the home (and `~/distrobox/dev`).
 
 Toolchains (rustup, Node, uv...) go in `dev`, not `main`, and projects go in `~/Dev`. The `.local` files and shell history are per home, so `dev` has its own. `dev`'s separate home is about clutter, not security, since the real home is still mounted in it.
 

@@ -720,7 +720,7 @@ main() {
     seed_local_from_backup "$ZSHRC_BACKUP" "$HOME/.zshrc.local" || return 1
     seed_local_from_backup "$ZPROFILE_BACKUP" "$HOME/.zprofile.local" || return 1
     # Only the shared-home box exports: the export path is $HOME/.local/bin,
-    # which is the real ~/.local/bin only there (dev's would land in ~/dbx/dev).
+    # which is the real ~/.local/bin only there (dev's would land in ~/distrobox/dev).
     if [ "$ENVIRONMENT" = distrobox-shared ]; then
         export_nvim_to_host
     fi
