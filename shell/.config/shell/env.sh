@@ -16,6 +16,25 @@ elif [ -x /usr/local/bin/brew ]; then
     eval "$(/usr/local/bin/brew shellenv)"
 fi
 
+# In a distrobox with its own home, PATH still carries the host's real
+# ~/.local/bin, whose exported launchers forward to other boxes (main's nvim).
+# Drop it so this box's own binaries win. Split by hand: zsh doesn't
+# word-split $PATH.
+if [ -n "${DISTROBOX_HOST_HOME:-}" ]; then
+    _rest="$PATH:"
+    _path=
+    while [ -n "$_rest" ]; do
+        _dir="${_rest%%:*}"
+        _rest="${_rest#*:}"
+        case "$_dir" in
+            "$DISTROBOX_HOST_HOME/.local/bin" | "") ;;
+            *) _path="${_path:+$_path:}$_dir" ;;
+        esac
+    done
+    PATH="$_path"
+    unset _rest _dir _path
+fi
+
 # User-installed binaries take precedence.
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;

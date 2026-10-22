@@ -16,13 +16,15 @@ The script installs everything with whatever package manager the system has (Hom
 
 You need git, Homebrew on a Mac, `sudo` on Linux, and an SSH key at `~/.ssh/id_ed25519` loaded into your agent.
 
+On Fedora Silverblue it works differently (everything lives in distroboxes), see [Fedora Silverblue](#fedora-silverblue).
+
 ### If it says "signing setup incomplete"
 
 I sign commits with my SSH key, and the script does a test signature at the end. If that fails the configs are still installed, git just can't sign yet. Usually `ssh-add ~/.ssh/id_ed25519` and re-running fixes it. If you don't want signing, put `commit.gpgsign = false` in `~/.gitconfig.local`.
 
 ## What's in here
 
-Each top-level folder is a stow package, and whatever's inside it gets symlinked into `~` at the same path. So `nvim/.config/nvim/init.lua` ends up at `~/.config/nvim/init.lua`. `.stowrc` points stow at `~`, so it works from wherever the repo is cloned.
+Each top-level folder (except `silverblue/` and `tests/`) is a stow package, and whatever's inside it gets symlinked into `~` at the same path. So `nvim/.config/nvim/init.lua` ends up at `~/.config/nvim/init.lua`. `.stowrc` points stow at `~`, so it works from wherever the repo is cloned.
 
 To add a new one, make a folder that mirrors the home-dir path (e.g. `tmux/.config/tmux/tmux.conf`), then `stow tmux`. Add it to `STOW_PACKAGES` in `install.sh` so the installer picks it up too.
 
@@ -57,6 +59,33 @@ Shell changes for every machine go in `shell/.zshrc` (or `shell/.config/shell/*.
 - **Ubuntu:** neovim comes from the unstable PPA, since LazyVim wants 0.11.2+.
 - **Debian/Ubuntu:** `fd` is called `fdfind`, so it gets symlinked to `~/.local/bin/fd`. Older releases without `git-delta`, `gh` or `zoxide` packages just skip them.
 - **Any Linux:** if the distro doesn't package starship, delta or a new enough neovim, they get installed under `~/.local` instead.
+
+## Fedora Silverblue
+
+The host is immutable, so I keep it nearly bare (bash, distrobox, the font) and do everything else in two [distroboxes](https://distrobox.it/), defined in `distrobox.ini`:
+
+- **`main`** is the daily driver. It shares the real home, so it behaves like a normal install.
+- **`dev`** is for programming languages. It gets its own home at `~/dbx/dev`, so all the `~/.cargo`, `~/.npm`, `~/.gradle` junk stays out of the real one. Deleting the box and that folder wipes it completely.
+
+Setting it up goes:
+
+1. On the host, run `./install.sh` (it only does the font and Ptyxis here), then `./silverblue/host.sh` to layer distrobox, then reboot.
+2. Run `./silverblue/assemble.sh` to create both boxes.
+3. In `main`, run `~/dotfiles/install.sh`. This also exports `nvim` to the host, so it works from a plain terminal.
+4. In `dev`, run `"$DISTROBOX_HOST_HOME/dotfiles/install.sh"`, because `~/dotfiles` isn't linked into `dev` until that first run.
+5. In Ptyxis, make profiles with the custom commands `distrobox enter main` and `distrobox enter dev`. Ptyxis's own container menu can open a non-login shell, which skips the config.
+
+Fedora upgrades don't happen inside a box. Rebuild with `./silverblue/assemble.sh --replace` and re-run `install.sh` in each box, since only the home survives.
+
+Toolchains (rustup, Node, uv...) go in `dev`, not `main`, and projects go in `~/Dev`. The `.local` files and shell history are per home, so `dev` has its own. `dev`'s separate home is about clutter, not security, since the real home is still mounted in it.
+
+**Heads up:** host git uses the same `.gitconfig`, which pages through delta, and delta only exists in the boxes. To make git work from a plain host terminal, add this to the host's `~/.bashrc`:
+
+```bash
+if [ -z "${CONTAINER_ID:-}" ] && ! command -v delta >/dev/null 2>&1; then
+    git() { command git -c core.pager=less -c interactive.diffFilter=cat "$@"; }
+fi
+```
 
 ## Doing it by hand
 
@@ -95,4 +124,4 @@ bash tests/install_test.sh
 /bin/bash tests/install_test.sh   # on macOS, checks it still works on Bash 3.2
 ```
 
-They run in throwaway home dirs with a fake SSH agent, so they won't touch the real setup.
+They run in throwaway home dirs with a fake SSH agent, so they won't touch the real setup. The Silverblue and distrobox paths are tested with stubs, so they run on any machine.

@@ -4,6 +4,7 @@ format = """
 [](color_orange)\
 $os\
 $username\
+${env_var.CONTAINER_ID}\
 [](bg:color_yellow fg:color_orange)\
 $directory\
 [](fg:color_yellow bg:color_aqua)\
@@ -77,6 +78,11 @@ show_always = true
 style_user = "bg:color_orange fg:color_fg0"
 style_root = "bg:color_orange fg:color_fg0"
 format = '[ $user ]($style)'
+
+# distrobox sets CONTAINER_ID to the box name; hidden everywhere else.
+[env_var.CONTAINER_ID]
+style = "bg:color_orange fg:color_fg0"
+format = '[ 📦 $env_value ]($style)'
 
 [directory]
 style = "fg:color_fg0 bg:color_yellow"

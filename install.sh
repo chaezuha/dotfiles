@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install script for these dotfiles.
 # Supported: macOS (Homebrew), Fedora/RHEL-family (dnf), Ubuntu (apt + Neovim PPA),
-# Debian (apt), Arch (pacman). Safe to re-run.
+# Debian (apt), Arch (pacman). On rpm-ostree hosts (Fedora Silverblue) it only
+# sets up the font and terminal; the rest runs inside distroboxes. Safe to re-run.
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -40,6 +41,14 @@ install_fedora() {
 
     # Only what base RHEL-family repos and Fedora both carry.
     sudo dnf install -y git nodejs npm python3 gcc unzip curl zsh
+
+    # Inside a distrobox (Silverblue) nothing else provides Java, and the
+    # shared nvim config (Java extra, google-java-format) needs it. 25 is the
+    # current LTS; -devel brings javac for the dev box.
+    if [ -n "${CONTAINER_ID:-}" ]; then
+        sudo dnf install -y java-25-openjdk-devel ||
+            warn "Could not install java-25-openjdk-devel; nvim's Java tooling will not work."
+    fi
 
     # These are not packaged everywhere (RHEL/EPEL has no gh or tree-sitter-cli,
     # and without EPEL most of them are missing) and one unknown name fails the
@@ -300,6 +309,132 @@ configure_ptyxis() {
     gsettings set org.gnome.Ptyxis font-name 'JetBrainsMono Nerd Font 13'
 }
 
+# rpm-ostree systems (Silverblue, Kinoite, ...) create this at boot. It is not
+# visible inside a distrobox, but detect_environment checks for a box first.
+is_ostree_booted() {
+    [ -e /run/ostree-booted ]
+}
+
+# Where this run is happening (Linux only):
+#   distrobox-own     inside a distrobox created with its own --home
+#   distrobox-shared  inside a distrobox that shares the real home
+#   ostree-host       on an rpm-ostree host (packages go in distroboxes)
+#   normal            any other Linux system
+# distrobox sets CONTAINER_ID in every box, and DISTROBOX_HOST_HOME (the real
+# home) only in boxes with a custom home.
+detect_environment() {
+    if [ -n "${CONTAINER_ID:-}" ]; then
+        if [ -n "${DISTROBOX_HOST_HOME:-}" ]; then
+            echo distrobox-own
+        else
+            echo distrobox-shared
+        fi
+    elif is_ostree_booted; then
+        echo ostree-host
+    else
+        echo normal
+    fi
+}
+
+# Shown on the host by install.sh and documented in the README. The stowed
+# .gitconfig pages through delta, which only exists inside the boxes. A shell
+# function (not exported) keeps it from leaking into `distrobox enter`.
+print_host_bashrc_snippet() {
+    cat <<'SNIPPET'
+    # dotfiles: delta only exists inside the distroboxes.
+    if [ -z "${CONTAINER_ID:-}" ] && ! command -v delta >/dev/null 2>&1; then
+        git() { command git -c core.pager=less -c interactive.diffFilter=cat "$@"; }
+    fi
+SNIPPET
+}
+
+# On an rpm-ostree host only the font and terminal live on the host; packages,
+# stow and git setup happen inside the distroboxes (see distrobox.ini).
+setup_ostree_host() {
+    info "rpm-ostree host detected; setting up only the font and Ptyxis here"
+    if command -v unzip >/dev/null 2>&1 && command -v fc-list >/dev/null 2>&1; then
+        install_nerd_font_linux
+    else
+        warn "unzip or fc-list missing on the host; skipping JetBrainsMono Nerd Font install."
+    fi
+    configure_ptyxis
+
+    cat <<EOF
+
+Next steps:
+  1. ./silverblue/host.sh                  (layers distrobox)
+  2. Reboot
+  3. ./silverblue/assemble.sh              (creates the main and dev boxes)
+  4. distrobox enter main, then: ~/dotfiles/install.sh
+  5. distrobox enter dev, then:  "\$DISTROBOX_HOST_HOME/dotfiles/install.sh"
+     (~/dotfiles only exists in dev after this first run)
+  6. In Ptyxis, make a default profile with the custom command
+     'distrobox enter main' and a second one with 'distrobox enter dev'
+  7. Optional: so git works in a plain host terminal, add to ~/.bashrc:
+
+EOF
+    print_host_bashrc_snippet
+}
+
+# Boxes with their own home lack the real home's keys, projects and this repo.
+# Link them in, but never replace anything that is already there.
+link_box_home_paths() {
+    local name target link
+    for name in .ssh Dev dotfiles; do
+        link="$HOME/$name"
+        if [ "$name" = dotfiles ]; then
+            target="$(pwd -P)"
+        else
+            target="$DISTROBOX_HOST_HOME/$name"
+        fi
+        path_exists "$link" && continue
+        if [ ! -e "$target" ]; then
+            warn "$target does not exist; not linking $link."
+            continue
+        fi
+        info "Linking $link to $target"
+        ln -s "$target" "$link" || warn "Could not link $link to $target."
+    done
+}
+
+# Put a launcher for this box's nvim in the real ~/.local/bin, so `nvim` (and
+# git's editor) work from a plain host terminal. Re-exporting rewrites the
+# launcher, and distrobox writes through symlinks, so only (re)write a missing
+# file or this box's own launcher. Never export a launcher itself: it would
+# exec itself forever.
+export_nvim_to_host() {
+    local dest_dir="$HOME/.local/bin" dest src candidate
+    dest="$dest_dir/nvim"
+    if ! command -v distrobox-export >/dev/null 2>&1; then
+        warn "distrobox-export not found; nvim is not exported to the host."
+        return 0
+    fi
+    if [ -L "$dest" ] ||
+       { path_exists "$dest" &&
+         ! { grep -Fqx '# distrobox_binary' "$dest" 2>/dev/null &&
+             grep -Fqx "# name: ${CONTAINER_ID:-}" "$dest" 2>/dev/null; }; }; then
+        warn "$dest exists and is not this box's nvim launcher; not exporting nvim." \
+             "Move it aside and re-run to export."
+        return 0
+    fi
+
+    src=""
+    while IFS= read -r candidate; do
+        [ "$candidate" = "$dest" ] && continue
+        grep -q distrobox_binary "$candidate" 2>/dev/null && continue
+        src="$candidate"
+        break
+    done < <(type -ap nvim)
+    if [ -z "$src" ]; then
+        warn "No nvim binary found in this box; not exporting nvim."
+        return 0
+    fi
+
+    info "Exporting $src to the host"
+    distrobox-export --bin "$src" --export-path "$dest_dir" >/dev/null ||
+        warn "distrobox-export failed; nvim is not available from the host."
+}
+
 # Make zsh the login shell on Linux, matching macOS (where it is the default).
 # sudo chsh avoids the password prompt (sudo is already primed from the
 # package install) and behaves the same on every supported distro.
@@ -542,14 +677,23 @@ main() {
     DELTA_VERSION=0.19.2
     ZSHRC_BACKUP=""
     ZPROFILE_BACKUP=""
+    ENVIRONMENT=normal
 
     case "$OS" in
         Darwin) install_macos ;;
-        Linux)  install_linux
+        Linux)  ENVIRONMENT="$(detect_environment)"
+                case "$ENVIRONMENT" in
+                    ostree-host)   setup_ostree_host; return 0 ;;
+                    distrobox-own) link_box_home_paths ;;
+                esac
+                install_linux
                 install_neovim_fallback
                 install_delta_fallback
-                install_nerd_font_linux
-                configure_ptyxis
+                # Font and terminal belong to the host, not to a distrobox.
+                if [ "$ENVIRONMENT" = normal ]; then
+                    install_nerd_font_linux
+                    configure_ptyxis
+                fi
                 set_default_shell_zsh ;;
         *)      die "Unsupported OS: $OS" ;;
     esac
@@ -558,6 +702,11 @@ main() {
     stow_packages || return 1
     seed_local_from_backup "$ZSHRC_BACKUP" "$HOME/.zshrc.local" || return 1
     seed_local_from_backup "$ZPROFILE_BACKUP" "$HOME/.zprofile.local" || return 1
+    # Only the shared-home box exports: the export path is $HOME/.local/bin,
+    # which is the real ~/.local/bin only there (dev's would land in ~/dbx/dev).
+    if [ "$ENVIRONMENT" = distrobox-shared ]; then
+        export_nvim_to_host
+    fi
     validate_git_signing || return 1
     info "Done."
 }

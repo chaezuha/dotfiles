@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run with /bin/bash tests/install_test.sh. No package installs or real-home writes.
-# Function overrides are called indirectly by the sourced installer.
-# shellcheck disable=SC2329
+# Function overrides are called indirectly by the sourced installer, and some
+# stub commands the installer only runs through sudo (which is stubbed too).
+# shellcheck disable=SC2329,SC2032
 # shellcheck source-path=SCRIPTDIR
 set -euo pipefail
 
@@ -40,6 +41,8 @@ fixture() {
     export PATH="$TEST_PATH" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$HOME/.gitconfig"
     unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_CONFIG_COUNT
     unset GIT_CONFIG_PARAMETERS SSH_AUTH_SOCK SSH_AGENT_PID NVIM_APPNAME VIMINIT EXINIT
+    # Running the suite inside a distrobox must not switch install modes.
+    unset CONTAINER_ID DISTROBOX_HOST_HOME
     export GIT_TERMINAL_PROMPT=0 GIT_AUTHOR_NAME=Audit GIT_AUTHOR_EMAIL=audit@example.invalid
     export GIT_COMMITTER_NAME=Audit GIT_COMMITTER_EMAIL=audit@example.invalid
     printf '# repo shell\n' >shell/.zshrc
@@ -346,6 +349,306 @@ ZSH
     assert test ! -s "$HOME/zsh.log"
 }
 
+# Stubs for commands a mode must never run: record the call and fail.
+forbidden() {
+    printf 'forbidden: %s\n' "$*" >>"$HOME/forbidden"
+    return 1
+}
+
+# Print a PATH holding only the named commands, so "not found" checks can't
+# reach whatever is installed on the machine running the suite.
+bare_path() {
+    local cmd
+    mkdir -p "$HOME/bare"
+    for cmd in "$@"; do
+        ln -sf "$(command -v "$cmd")" "$HOME/bare/$cmd"
+    done
+    printf '%s\n' "$HOME/bare"
+}
+
+test_detect_environment() {
+    local ostree=1
+    is_ostree_booted() { return "$ostree"; }
+    assert test "$(detect_environment)" = normal
+    ostree=0
+    assert test "$(detect_environment)" = ostree-host
+    # A box wins over the host check, whatever is visible from inside it.
+    export CONTAINER_ID=main
+    assert test "$(detect_environment)" = distrobox-shared
+    export DISTROBOX_HOST_HOME=/var/home/me
+    assert test "$(detect_environment)" = distrobox-own
+    ostree=1
+    assert test "$(detect_environment)" = distrobox-own
+}
+
+test_ostree_host_main() {
+    local events="$HOME/events"
+    uname() { printf 'Linux\n'; }
+    is_ostree_booted() { return 0; }
+    sudo() { forbidden sudo "$@"; }
+    dnf() { forbidden dnf "$@"; }
+    rpm-ostree() { forbidden rpm-ostree "$@"; }
+    stow() { forbidden stow "$@"; }
+    chsh() { forbidden chsh "$@"; }
+    install_linux() { forbidden install_linux; }
+    set_default_shell_zsh() { forbidden set_default_shell_zsh; }
+    setup_git_credential_helper() { forbidden setup_git_credential_helper; }
+    stow_packages() { forbidden stow_packages; }
+    validate_git_signing() { forbidden validate_git_signing; }
+    export_nvim_to_host() { forbidden export_nvim_to_host; }
+    unzip() { :; }
+    fc-list() { :; }
+    install_nerd_font_linux() { printf 'font\n' >>"$events"; }
+    configure_ptyxis() { printf 'ptyxis\n' >>"$events"; }
+    main >"$HOME/out.log"
+    assert test ! -e "$HOME/forbidden"
+    printf 'font\nptyxis\n' >"$HOME/expected"
+    assert cmp "$HOME/expected" "$events"
+    assert grep -F 'silverblue/host.sh' "$HOME/out.log"
+    assert grep -F 'silverblue/assemble.sh' "$HOME/out.log"
+    assert grep -F 'git() { command git -c core.pager=less -c interactive.diffFilter=cat "$@"; }' "$HOME/out.log"
+    # Without unzip the font is skipped with a warning; Ptyxis still runs.
+    rm "$events"
+    unset -f unzip
+    PATH="$(bare_path cat dirname)" main >/dev/null 2>"$HOME/err.log"
+    assert grep -F 'skipping JetBrainsMono' "$HOME/err.log"
+    printf 'ptyxis\n' >"$HOME/expected"
+    assert cmp "$HOME/expected" "$events"
+}
+
+test_distrobox_main_modes() {
+    local events="$HOME/events"
+    uname() { printf 'Linux\n'; }
+    is_ostree_booted() { return 1; }
+    install_linux() { printf 'install\n' >>"$events"; }
+    install_neovim_fallback() { :; }
+    install_delta_fallback() { :; }
+    set_default_shell_zsh() { printf 'shell\n' >>"$events"; }
+    install_nerd_font_linux() { forbidden install_nerd_font_linux; }
+    configure_ptyxis() { forbidden configure_ptyxis; }
+    setup_git_credential_helper() { :; }
+    stow_packages() { printf 'stow\n' >>"$events"; }
+    link_box_home_paths() { printf 'links\n' >>"$events"; }
+    export_nvim_to_host() { printf 'export\n' >>"$events"; }
+    validate_git_signing() { printf 'signing\n' >>"$events"; }
+
+    export CONTAINER_ID=main
+    main >/dev/null
+    printf 'install\nshell\nstow\nexport\nsigning\n' >"$HOME/expected"
+    assert cmp "$HOME/expected" "$events"
+
+    rm "$events"
+    export CONTAINER_ID=dev DISTROBOX_HOST_HOME="$HOME/host"
+    main >/dev/null
+    printf 'links\ninstall\nshell\nstow\nsigning\n' >"$HOME/expected"
+    assert cmp "$HOME/expected" "$events"
+    assert test ! -e "$HOME/forbidden"
+}
+
+test_box_home_links() {
+    local host repo
+    host="$(cd "$HOME/.." && pwd -P)/host"
+    repo="$(pwd -P)"
+    mkdir -p "$host/.ssh"
+    export DISTROBOX_HOST_HOME="$host"
+
+    # The host has no Dev yet: warn and skip it.
+    link_box_home_paths >/dev/null 2>"$HOME/err.log"
+    assert test "$(readlink "$HOME/.ssh")" = "$host/.ssh"
+    assert test "$(readlink "$HOME/dotfiles")" = "$repo"
+    assert test ! -e "$HOME/Dev"
+    assert test ! -L "$HOME/Dev"
+    assert grep -F "$host/Dev does not exist" "$HOME/err.log"
+
+    # Re-running changes nothing.
+    link_box_home_paths >/dev/null 2>&1
+    assert test "$(readlink "$HOME/.ssh")" = "$host/.ssh"
+    assert test "$(readlink "$HOME/dotfiles")" = "$repo"
+    assert test ! -L "$HOME/Dev"
+
+    # Existing paths, even a dangling symlink, are never replaced.
+    mkdir "$host/Dev"
+    rm "$HOME/.ssh" "$HOME/dotfiles"
+    ln -s "$HOME/nowhere" "$HOME/.ssh"
+    mkdir "$HOME/Dev"
+    printf 'mine\n' >"$HOME/Dev/marker"
+    printf 'mine\n' >"$HOME/dotfiles"
+    link_box_home_paths >/dev/null 2>&1
+    assert test "$(readlink "$HOME/.ssh")" = "$HOME/nowhere"
+    assert test ! -L "$HOME/Dev"
+    assert grep -qx mine "$HOME/Dev/marker"
+    assert grep -qx mine "$HOME/dotfiles"
+}
+
+test_export_nvim() {
+    local dest="$HOME/.local/bin/nvim" log="$HOME/export.log"
+    export CONTAINER_ID=main
+    mkdir -p "$HOME/.local/bin" "$HOME/usr/bin" "$HOME/.local/opt/nvim/bin"
+    printf '#!/bin/sh\necho real\n' >"$HOME/usr/bin/nvim"
+    printf '#!/bin/sh\necho fallback\n' >"$HOME/.local/opt/nvim/bin/nvim"
+    chmod +x "$HOME/usr/bin/nvim" "$HOME/.local/opt/nvim/bin/nvim"
+    cp "$HOME/.local/opt/nvim/bin/nvim" "$HOME/fallback.orig"
+    distrobox-export() { printf '%s\n' "$*" >>"$log"; }
+    launcher() {
+        printf '#!/bin/sh\n# distrobox_binary\n# name: %s\nexec /usr/bin/nvim "$@"\n' "$1" >"$dest"
+        chmod +x "$dest"
+    }
+
+    # This box's own launcher comes first on PATH: skip it, export the real
+    # binary to the explicit destination.
+    launcher main
+    export PATH="$HOME/.local/bin:$HOME/usr/bin:$TEST_PATH"
+    export_nvim_to_host >/dev/null
+    printf -- '--bin %s --export-path %s\n' "$HOME/usr/bin/nvim" "$HOME/.local/bin" >"$HOME/expected"
+    assert cmp "$HOME/expected" "$log"
+
+    # A fallback symlink at the destination is refused even though a
+    # different nvim comes first on PATH, and its target is left alone.
+    rm "$log" "$dest"
+    ln -s "$HOME/.local/opt/nvim/bin/nvim" "$dest"
+    export PATH="$HOME/usr/bin:$HOME/.local/bin:$TEST_PATH"
+    export_nvim_to_host >/dev/null 2>"$HOME/err.log"
+    assert test ! -e "$log"
+    assert grep -F "not this box's nvim launcher" "$HOME/err.log"
+    assert cmp "$HOME/fallback.orig" "$HOME/.local/opt/nvim/bin/nvim"
+
+    # A dangling symlink is refused too.
+    rm "$dest"
+    ln -s "$HOME/missing" "$dest"
+    export_nvim_to_host >/dev/null 2>&1
+    assert test ! -e "$log"
+    assert test ! -e "$HOME/missing"
+
+    # So is a symlink to a valid launcher: distrobox would write through it.
+    rm "$dest"
+    launcher main
+    mv "$dest" "$HOME/real-launcher"
+    ln -s "$HOME/real-launcher" "$dest"
+    cp "$HOME/real-launcher" "$HOME/launcher.orig"
+    export_nvim_to_host >/dev/null 2>&1
+    assert test ! -e "$log"
+    assert cmp "$HOME/launcher.orig" "$HOME/real-launcher"
+
+    # So are an unrelated file and another box's launcher.
+    rm "$dest"
+    printf 'not a launcher\n' >"$dest"
+    cp "$dest" "$HOME/dest.orig"
+    export_nvim_to_host >/dev/null 2>&1
+    assert test ! -e "$log"
+    assert cmp "$HOME/dest.orig" "$dest"
+    launcher dev
+    cp "$dest" "$HOME/dest.orig"
+    export_nvim_to_host >/dev/null 2>&1
+    assert test ! -e "$log"
+    assert cmp "$HOME/dest.orig" "$dest"
+
+    # Without distrobox-export it warns and carries on. The bare PATH hides
+    # the real one every distrobox has in /usr/bin.
+    rm "$dest"
+    unset -f distrobox-export
+    PATH="$(bare_path)" export_nvim_to_host >/dev/null 2>"$HOME/err.log"
+    assert grep -F 'distrobox-export not found' "$HOME/err.log"
+}
+
+test_assemble_wrapper() {
+    local script="$REPO/silverblue/assemble.sh" manifest="$REPO/distrobox.ini"
+    local before home tmp
+    mkdir "$HOME/bin"
+    export AUDIT_DBX_LOG="$HOME/dbx.log" AUDIT_DBX_COPY="$HOME/dbx.ini"
+    cat >"$HOME/bin/distrobox" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >"$AUDIT_DBX_LOG"
+while [ $# -gt 0 ]; do
+    if [ "$1" = --file ]; then cp "$2" "$AUDIT_DBX_COPY"; fi
+    shift
+done
+STUB
+    chmod +x "$HOME/bin/distrobox"
+    export PATH="$HOME/bin:$TEST_PATH"
+    before="$(cksum <"$manifest")"
+
+    for home in /home/harley /var/home/harley; do
+        rm -f "$AUDIT_DBX_LOG" "$AUDIT_DBX_COPY"
+        HOME="$home" "$BASH" "$script" --replace
+        assert grep -qx "home=$home/dbx/dev" "$AUDIT_DBX_COPY"
+        expect_failure grep -q '@HOME@' "$AUDIT_DBX_COPY"
+        tmp="$(sed -n 's/^assemble create --file \(.*\) --replace$/\1/p' "$AUDIT_DBX_LOG")"
+        assert test -n "$tmp"
+        assert test ! -e "$tmp"
+    done
+    rm -f "$AUDIT_DBX_LOG"
+
+    # Unsafe homes fail before a manifest is written or distrobox runs.
+    # shellcheck disable=SC2016 # literal $ on purpose
+    for home in '/home/har ley' '/home/a&b' '/home/$x' '/home/a;b' "/home/a'b" \
+                '/home/a"b' 'home/relative' ''; do
+        expect_failure env HOME="$home" "$BASH" "$script" 2>"$HOME/err.log"
+        assert grep -F 'Unsupported home path' "$HOME/err.log"
+    done
+    expect_failure env -u HOME "$BASH" "$script" 2>"$HOME/err.log"
+    assert grep -F "Unsupported home path '<unset or empty>'" "$HOME/err.log"
+    # In a UTF-8 locale A-Za-z can match accented letters; the check must not.
+    expect_failure env LC_ALL=en_US.UTF-8 HOME=/home/hárley "$BASH" "$script" 2>"$HOME/err.log"
+    assert grep -F 'Unsupported home path' "$HOME/err.log"
+    assert test ! -e "$AUDIT_DBX_LOG"
+    assert test -z "$(find "$TMPDIR" -name 'distrobox.*')"
+
+    expect_failure env CONTAINER_ID=main HOME=/home/harley "$BASH" "$script" 2>"$HOME/err.log"
+    assert grep -F 'not inside a distrobox' "$HOME/err.log"
+    assert test ! -e "$AUDIT_DBX_LOG"
+
+    # A bare PATH, so a real distrobox on this machine is never run.
+    expect_failure env PATH="$(bare_path dirname)" HOME=/home/harley "$BASH" "$script" 2>"$HOME/err.log"
+    assert grep -F 'distrobox not found: run silverblue/host.sh and reboot first' "$HOME/err.log"
+
+    assert test "$(cksum <"$manifest")" = "$before"
+}
+
+test_env_drops_host_bin_in_own_box() {
+    local host="$HOME/host" box="$HOME/box" shell got
+    local start="$host/.local/bin:$HOME/boxbin::/usr/bin:/bin"
+    mkdir -p "$box"
+    # shellcheck disable=SC2016 # expands in the child shell
+    local check='. "$1" && printf "%s\n" "$PATH"'
+
+    # Checks PATH entries rather than which nvim wins: env.sh may also put
+    # Homebrew first on the machine running the suite.
+    for shell in sh zsh; do
+        if ! command -v "$shell" >/dev/null 2>&1; then
+            printf 'SKIP: env.sh PATH check under %s (unavailable)\n' "$shell"
+            continue
+        fi
+        shell="$(command -v "$shell")"
+        # Inside an own-home box, the host's ~/.local/bin (main's launchers)
+        # is dropped; the rest of the inherited PATH is kept.
+        got=":$(env HOME="$box" DISTROBOX_HOST_HOME="$host" PATH="$start" \
+                    "$shell" -c "$check" sh "$REPO/shell/.config/shell/env.sh"):"
+        expect_failure grep -qF ":$host/.local/bin:" <<<"$got"
+        assert grep -qF ":$box/.local/bin:" <<<"$got"
+        assert grep -qF ":$HOME/boxbin:/usr/bin:/bin:" <<<"$got"
+        # Outside one (host, shared-home box), ~/.local/bin is left alone.
+        got=":$(env -u DISTROBOX_HOST_HOME HOME="$host" PATH="$start" \
+                    "$shell" -c "$check" sh "$REPO/shell/.config/shell/env.sh"):"
+        assert grep -qF ":$host/.local/bin:$HOME/boxbin:" <<<"$got"
+    done
+}
+
+test_host_script_refuses() {
+    mkdir "$HOME/bin"
+    # shellcheck disable=SC2016 # expands in the stub, not here
+    printf '#!/bin/sh\necho called >>"$HOME/called"\n' >"$HOME/bin/sudo"
+    cp "$HOME/bin/sudo" "$HOME/bin/rpm-ostree"
+    chmod +x "$HOME/bin/sudo" "$HOME/bin/rpm-ostree"
+    # host.sh can't be made to miss /run/ostree-booted, so the plain refusal
+    # is only checkable off an rpm-ostree host.
+    if [ ! -e /run/ostree-booted ]; then
+        expect_failure env PATH="$HOME/bin:$TEST_PATH" "$BASH" "$REPO/silverblue/host.sh" 2>"$HOME/err.log"
+        assert grep -F 'rpm-ostree host' "$HOME/err.log"
+    fi
+    expect_failure env CONTAINER_ID=main PATH="$HOME/bin:$TEST_PATH" "$BASH" "$REPO/silverblue/host.sh" 2>/dev/null
+    assert test ! -e "$HOME/called"
+}
+
 for test_name in \
     test_source_helpers test_backup_seed_and_rerun test_stale_regular_backup \
     test_seed_destinations_and_failure test_no_clobber_results \
@@ -353,7 +656,10 @@ for test_name in \
     test_partial_apply_retains_backup test_zprofile_backup \
     test_stow_ignored_not_backed_up test_credential_helper test_nvim_isolation \
     test_signing_disabled_and_old_git test_real_signing test_probe_setup_failure \
-    test_main_order test_zshrc_sources_local; do
+    test_main_order test_zshrc_sources_local \
+    test_detect_environment test_ostree_host_main test_distrobox_main_modes \
+    test_box_home_links test_export_nvim test_assemble_wrapper \
+    test_env_drops_host_bin_in_own_box test_host_script_refuses; do
     (
         fixture "$test_name"
         "$test_name"
