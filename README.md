@@ -75,7 +75,7 @@ Setting it up goes:
 4. In `dev`, run `"$DISTROBOX_HOST_HOME/dotfiles/install.sh"`, because `~/dotfiles` isn't linked into `dev` until that first run.
 5. In Ptyxis, make profiles with the custom commands `distrobox enter main` and `distrobox enter dev`. Ptyxis's own container menu can open a non-login shell, which skips the config.
 
-To move the boxes to a new Fedora release, rebuild them instead of upgrading in place: `./silverblue/assemble.sh --replace`, then re-run `install.sh` in each one. A rebuild wipes the packages but keeps the home (and `~/distrobox/dev`).
+To move the boxes to a new Fedora release, rebuild them instead of upgrading in place: `./silverblue/assemble.sh --replace`, then re-run `install.sh` in each one. A rebuild keeps the home (and `~/distrobox/dev`) but wipes every package, including ones you installed yourself with `dnf install`. To keep one, add it to the box's `additional_packages` in `distrobox.ini` or reinstall it after (`dnf history list` shows what you installed).
 
 Toolchains (rustup, Node, uv...) go in `dev`, not `main`, and projects go in `~/Dev`. The `.local` files and shell history are per home, so `dev` has its own. `dev`'s separate home is about clutter, not security, since the real home is still mounted in it.
 
