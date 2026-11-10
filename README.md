@@ -80,7 +80,8 @@ To move the boxes to a new Fedora release, rebuild them instead of upgrading in 
 1. In each box, save the packages and repos you added. Both land in that box's home:
 
    ```sh
-   dnf repoquery --installed --userinstalled --queryformat '%{name}\n' | sort |
+   touch ~/.dnf-baseline.txt
+   dnf repoquery --userinstalled --queryformat '%{name}\n' | sort |
        comm -13 ~/.dnf-baseline.txt - > ~/dnf-packages.txt
    rm -rf ~/dnf-repos && mkdir ~/dnf-repos
    for f in /etc/yum.repos.d/*.repo; do
@@ -88,13 +89,13 @@ To move the boxes to a new Fedora release, rebuild them instead of upgrading in 
    done
    ```
 
-   `~/.dnf-baseline.txt` lists what a fresh box has (step 3 writes it). If it doesn't exist yet, `touch` it first: the saved list then holds every package, which still works, it's just long.
+   `~/.dnf-baseline.txt` lists what a fresh box has (step 3 writes it). Before the first rebuild it is empty, so the saved list holds every package, which still works, it's just long.
 
 2. On the host, rebuild: `./silverblue/assemble.sh --replace`
 3. In each box, re-run `~/dotfiles/install.sh`, then record the new baseline and put your repos and packages back, in this order:
 
    ```sh
-   dnf repoquery --installed --userinstalled --queryformat '%{name}\n' | sort > ~/.dnf-baseline.txt
+   dnf repoquery --userinstalled --queryformat '%{name}\n' | sort > ~/.dnf-baseline.txt
    sudo cp -r ~/dnf-repos/. /etc/yum.repos.d/
    sudo dnf install --skip-unavailable $(cat ~/dnf-packages.txt)
    ```
