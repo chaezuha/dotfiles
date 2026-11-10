@@ -253,7 +253,7 @@ test_nvim_isolation() {
     mkdir -p "$XDG_CONFIG_HOME/nvim"
     printf 'vim.fn.writefile({"ran"}, vim.env.HOME .. "/nvim-marker")\n' >"$XDG_CONFIG_HOME/nvim/init.lua"
     local expected=0 actual=0
-    nvim --headless -u NONE -i NONE -n -c 'if has("nvim-0.11.2") | q | else | cq | endif' || expected=$?
+    nvim --headless -u NONE -i NONE -n -c 'if has("nvim-0.12") | q | else | cq | endif' || expected=$?
     nvim_is_current "$(command -v nvim)" || actual=$?
     assert test "$actual" -eq "$expected"
     assert test ! -e "$HOME/nvim-marker"
@@ -680,7 +680,146 @@ test_host_script_refuses() {
     assert test ! -e "$HOME/called"
 }
 
+test_version_at_least() {
+    assert version_at_least 0.26.1 0.26.1
+    assert version_at_least 0.26.11 0.26.1
+    assert version_at_least 0.27 0.26.1
+    assert version_at_least 1:0.26.11-3build1 0.26.1
+    assert version_at_least 2.39 2.39
+    expect_failure version_at_least 0.26.0 0.26.1
+    expect_failure version_at_least 0.26 0.26.1
+    expect_failure version_at_least 0.22.6-1 0.26.1
+    expect_failure version_at_least 0.9.5 0.26.1
+    expect_failure version_at_least 2.36 2.39
+    expect_failure version_at_least "" 0.26.1
+    expect_failure version_at_least "(none)" 0.26.1
+}
+
+test_treesitter_cli_gate() {
+    local pkg_version=0.22.6-1 libc_version=2.41 path
+    # Not named candidate/glibc: the stubs run inside install_treesitter_cli,
+    # whose locals of those names would shadow these.
+    TREESITTER_MIN_VERSION=0.26.1
+    # Hide any tree-sitter installed on the machine running the suite.
+    path="$(bare_path awk grep rm)"
+    PATH="$path"
+    apt-cache() { printf 'tree-sitter-cli:\n  Installed: (none)\n  Candidate: %s\n' "$pkg_version"; }
+    dnf() { printf '\n%s\n' "$pkg_version"; }
+    getconf() { printf 'glibc %s\n' "$libc_version"; }
+    sudo() { printf '%s\n' "$*" >>"$HOME/sudo"; }
+    npm() { forbidden npm "$@"; }
+
+    # Package too old, nothing on PATH: install nothing, leave it to mason.
+    install_treesitter_cli apt >"$HOME/out" 2>"$HOME/err"
+    assert grep -F mason "$HOME/out"
+    assert test ! -s "$HOME/err"
+    assert test ! -e "$HOME/sudo"
+
+    # Same on an old glibc: the mason binary will not run either.
+    libc_version=2.36
+    install_treesitter_cli apt >/dev/null 2>"$HOME/err"
+    assert grep -F 'older than 2.39' "$HOME/err"
+    assert test ! -e "$HOME/sudo"
+    libc_version=2.41
+
+    # A stale or broken tree-sitter on PATH blocks mason: warn about it.
+    tree-sitter() { printf 'tree-sitter 0.22.6 (abc123)\n'; }
+    install_treesitter_cli apt >/dev/null 2>"$HOME/err"
+    assert grep -F 'Remove it' "$HOME/err"
+    tree-sitter() { return 127; }
+    install_treesitter_cli apt >/dev/null 2>"$HOME/err"
+    assert grep -F 'Remove it' "$HOME/err"
+    assert test ! -e "$HOME/sudo"
+
+    # Already current: nothing to do, the package manager is not consulted.
+    tree-sitter() { printf 'tree-sitter 0.26.11 (abc123)\n'; }
+    pkg_version=forbidden
+    install_treesitter_cli apt >"$HOME/out" 2>&1
+    assert test ! -s "$HOME/out"
+    assert test ! -e "$HOME/sudo"
+    unset -f tree-sitter
+
+    # Package new enough: install it, with either package manager.
+    pkg_version=0.26.11-2
+    install_treesitter_cli apt >/dev/null 2>&1
+    assert grep -Fx 'apt-get install -y tree-sitter-cli' "$HOME/sudo"
+    rm "$HOME/sudo"
+    pkg_version=0.26.11
+    install_treesitter_cli dnf >/dev/null 2>&1
+    assert grep -Fx 'dnf install -y tree-sitter-cli' "$HOME/sudo"
+    assert test ! -e "$HOME/forbidden"
+}
+
+test_neovim_fallback_verifies() {
+    local src="$HOME/src" status=1
+    # Neither the machine's nvim nor a real download may be used.
+    nvim() { return 1; }
+    uname() { printf 'x86_64\n'; }
+    curl() { cat "$HOME/nvim.tar.gz"; }
+    pack() {
+        mkdir -p "$src/nvim-linux-x86_64/bin"
+        printf '#!/bin/sh\nexit %s\n' "$status" >"$src/nvim-linux-x86_64/bin/nvim"
+        chmod +x "$src/nvim-linux-x86_64/bin/nvim"
+        tar -czf "$HOME/nvim.tar.gz" -C "$src" nvim-linux-x86_64
+    }
+
+    # A release binary that cannot run here is removed again.
+    pack
+    install_neovim_fallback >/dev/null 2>"$HOME/err"
+    assert grep -F 'glibc 2.34' "$HOME/err"
+    assert test ! -e "$HOME/.local/bin/nvim"
+    assert test ! -L "$HOME/.local/bin/nvim"
+    assert test ! -e "$HOME/.local/opt/nvim"
+
+    # One that runs stays linked.
+    status=0
+    pack
+    install_neovim_fallback >/dev/null 2>"$HOME/err"
+    assert test ! -s "$HOME/err"
+    assert test -x "$HOME/.local/bin/nvim"
+    assert test -d "$HOME/.local/opt/nvim"
+}
+
+test_fedora_epel_gate() {
+    local ID PLATFORM_ID VERSION_ID
+    sudo() { printf '%s\n' "$*" >>"$HOME/sudo"; }
+    install_starship_fallback() { :; }
+    install_treesitter_cli() { :; }
+
+    # Fedora derivatives keep Fedora's PLATFORM_ID and have no EPEL.
+    ID=nobara PLATFORM_ID=platform:f43 VERSION_ID=43
+    install_fedora >/dev/null 2>&1
+    expect_failure grep -F epel-release "$HOME/sudo"
+    assert grep -Fx 'dnf install -y git nodejs npm python3 gcc unzip zsh' "$HOME/sudo"
+    # curl is already on the machine running the suite, so it is not installed.
+    expect_failure grep -Fx 'dnf install -y curl' "$HOME/sudo"
+
+    rm "$HOME/sudo"
+    ID=fedora PLATFORM_ID=platform:f43
+    install_fedora >/dev/null 2>&1
+    expect_failure grep -F epel-release "$HOME/sudo"
+
+    rm "$HOME/sudo"
+    ID=rocky PLATFORM_ID=platform:el9 VERSION_ID=9.6
+    install_fedora >/dev/null 2>&1
+    assert grep -Fx 'dnf install -y epel-release' "$HOME/sudo"
+}
+
+test_default_shell_without_user() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        printf 'SKIP: login shell change (zsh unavailable)\n'
+        return
+    fi
+    getent() { printf 'someone:x:1000:1000::/home/someone:/bin/bash\n'; }
+    sudo() { printf '%s\n' "$*" >>"$HOME/sudo"; }
+    unset USER
+    set_default_shell_zsh >/dev/null 2>&1
+    assert grep -Fx "chsh -s $(command -v zsh) $(id -un)" "$HOME/sudo"
+}
+
 for test_name in \
+    test_version_at_least test_treesitter_cli_gate test_neovim_fallback_verifies \
+    test_fedora_epel_gate test_default_shell_without_user \
     test_source_helpers test_backup_seed_and_rerun test_stale_regular_backup \
     test_seed_destinations_and_failure test_no_clobber_results \
     test_unresolved_conflict test_backup_failure_rollback test_apply_failure_rollback \

@@ -56,9 +56,9 @@ Shell changes for every machine go in `shell/.zshrc` (or `shell/.config/shell/*.
 ## Distro quirks
 
 - **RHEL family:** turns on EPEL to get stow.
-- **Ubuntu:** neovim comes from the unstable PPA, since LazyVim wants 0.11.2+.
 - **Debian/Ubuntu:** `fd` is called `fdfind`, so it gets symlinked to `~/.local/bin/fd`. Older releases without `git-delta`, `gh` or `zoxide` packages just skip them.
-- **Any Linux:** if the distro doesn't package starship, delta or a new enough neovim, they get installed under `~/.local` instead.
+- **Any Linux:** if the distro doesn't package starship, delta or a new enough neovim (0.12+, which the locked plugins need), they get installed under `~/.local` instead. The neovim release binary needs glibc 2.34+.
+- **tree-sitter CLI:** nvim-treesitter needs 0.26.1+, so the distro package is only installed when it's that new. Otherwise LazyVim installs its own through mason the first time `nvim` starts (that binary needs glibc 2.39+).
 
 ## Fedora Silverblue
 
@@ -89,7 +89,7 @@ fi
 
 ## Doing it by hand
 
-On a distro the script doesn't know, install these first: stow, git, neovim, node, ripgrep, fd, tree-sitter, gh, python3, starship, zsh (plus zsh-autosuggestions and zsh-syntax-highlighting), and a C compiler.
+On a distro the script doesn't know, install these first: stow, git, neovim (0.12+), node, ripgrep, fd, tree-sitter CLI (0.26.1+), gh, python3, starship, zsh (plus zsh-autosuggestions and zsh-syntax-highlighting), and a C compiler.
 
 Then stow whatever you want (this also works for just grabbing a few configs):
 

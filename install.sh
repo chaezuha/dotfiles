@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install script for these dotfiles.
-# Supported: macOS (Homebrew), Fedora/RHEL-family (dnf), Ubuntu (apt + Neovim PPA),
-# Debian (apt), Arch (pacman). On rpm-ostree hosts (Fedora Silverblue) it only
+# Supported: macOS (Homebrew), Fedora/RHEL-family (dnf), Debian/Ubuntu (apt),
+# Arch (pacman). On rpm-ostree hosts (Fedora Silverblue) it only
 # sets up the font and terminal; the rest runs inside distroboxes. Safe to re-run.
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -31,16 +31,23 @@ install_fedora() {
     # RHEL clones need EPEL for stow, ripgrep, fd, fzf, zoxide, git-delta and
     # the zsh plugins. Rocky/Alma ship epel-release in their own repos; RHEL
     # proper only has it as a release RPM from the Fedora project.
-    # ($ID and $VERSION_ID were set when install_linux sourced /etc/os-release.)
-    if [ "${ID:-}" != fedora ]; then
-        sudo dnf install -y epel-release 2>/dev/null ||
-            { [ "${ID:-}" = rhel ] &&
-              sudo dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${VERSION_ID%%.*}.noarch.rpm"; } ||
-            warn "Could not enable EPEL; packages it provides (stow, ripgrep, fd, fzf, ...) may be skipped below."
-    fi
+    # Fedora derivatives (Nobara, Bazzite, ...) have their own ID but keep
+    # Fedora's PLATFORM_ID (platform:f43), and EPEL is not for them either.
+    # ($ID, $VERSION_ID and $PLATFORM_ID were set when install_linux sourced
+    # /etc/os-release.)
+    case "${ID:-}:${PLATFORM_ID:-}" in
+        fedora:*|*:platform:f*) ;;
+        *)  sudo dnf install -y epel-release 2>/dev/null ||
+                { [ "${ID:-}" = rhel ] &&
+                  sudo dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${VERSION_ID%%.*}.noarch.rpm"; } ||
+                warn "Could not enable EPEL; packages it provides (stow, ripgrep, fd, fzf, ...) may be skipped below." ;;
+    esac
 
     # Only what base RHEL-family repos and Fedora both carry.
-    sudo dnf install -y git nodejs npm python3 gcc unzip curl zsh
+    sudo dnf install -y git nodejs npm python3 gcc unzip zsh
+    # Minimal RHEL-family images ship curl-minimal, which conflicts with the
+    # curl package; either one provides the command, so only install when absent.
+    command -v curl >/dev/null 2>&1 || sudo dnf install -y curl
 
     # Inside a distrobox (Silverblue) nothing else provides Java, and the
     # shared nvim config (Java extra, google-java-format) needs it. 25 is the
@@ -50,12 +57,12 @@ install_fedora() {
             warn "Could not install java-25-openjdk-devel; nvim's Java tooling will not work."
     fi
 
-    # These are not packaged everywhere (RHEL/EPEL has no gh or tree-sitter-cli,
-    # and without EPEL most of them are missing) and one unknown name fails the
-    # whole dnf transaction, so install them one at a time and keep going when
-    # one is missing. Neovim has a release-tarball fallback in main.
+    # These are not packaged everywhere (RHEL/EPEL has no gh, and without EPEL
+    # most of them are missing) and one unknown name fails the whole dnf
+    # transaction, so install them one at a time and keep going when one is
+    # missing. Neovim has a release-tarball fallback in main.
     local pkg
-    for pkg in stow neovim ripgrep fd-find tree-sitter-cli gh fzf zoxide git-delta \
+    for pkg in stow neovim ripgrep fd-find gh fzf zoxide git-delta \
                zsh-autosuggestions zsh-syntax-highlighting; do
         sudo dnf install -y "$pkg" 2>/dev/null ||
             warn "$pkg is not available from dnf on this system; skipping."
@@ -67,10 +74,7 @@ install_fedora() {
     # Not in the official Fedora or RHEL/EPEL repos, but try in case a repo provides it.
     sudo dnf install -y starship 2>/dev/null || install_starship_fallback
 
-    if ! command -v tree-sitter >/dev/null 2>&1; then
-        info "tree-sitter-cli not packaged here; installing via npm"
-        sudo npm install -g tree-sitter-cli
-    fi
+    install_treesitter_cli dnf
     command -v gh >/dev/null 2>&1 ||
         warn "gh is not in RHEL/EPEL. To install it, add GitHub's repo:" \
              "https://cli.github.com/packages/rpm/gh-cli.repo"
@@ -103,17 +107,72 @@ install_starship_fallback() {
         warn "starship install failed; the shell config falls back to a plain prompt."
 }
 
-# tree-sitter-cli only exists in apt on the newest Debian/Ubuntu releases;
-# fall back to npm (already installed on the apt platforms) elsewhere.
+# True when dotted version $1 is at least $2 (first three components).
+# An epoch and anything after the digits and dots (apt's -3build1) is ignored;
+# an empty or non-numeric $1 is never enough.
+version_at_least() {
+    local hp wp i h w
+    IFS=. read -r -a hp <<<"$(v="${1##*:}"; printf '%s' "${v%%[!0-9.]*}")"
+    IFS=. read -r -a wp <<<"${2%%[!0-9.]*}"
+    [ "${#hp[@]}" -gt 0 ] || return 1
+    for i in 0 1 2; do
+        h="${hp[$i]:-0}"
+        w="${wp[$i]:-0}"
+        if [ "$((10#$h))" -gt "$((10#$w))" ]; then return 0; fi
+        if [ "$((10#$h))" -lt "$((10#$w))" ]; then return 1; fi
+    done
+    return 0
+}
+
+# A tree-sitter that is missing, too old, or cannot run (wrong glibc) all
+# count as not current.
+treesitter_is_current() {
+    local out
+    out="$(tree-sitter --version 2>/dev/null)" || return 1
+    [[ "$out" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]] || return 1
+    version_at_least "${BASH_REMATCH[1]}" "$TREESITTER_MIN_VERSION"
+}
+
+# nvim-treesitter (as locked in lazy-lock.json) needs a recent tree-sitter CLI
+# and distro packages are often behind (Debian 13, Ubuntu 26.04). Install the
+# package ($1 is apt or dnf) only when it is new enough: LazyVim installs its
+# own copy through mason when no tree-sitter is on PATH, so a stale one is
+# worse than none. npm is not an option; nvim-treesitter rejects it.
 install_treesitter_cli() {
-    if command -v tree-sitter >/dev/null 2>&1; then
-        return
+    local manager="$1" candidate="" glibc
+    if treesitter_is_current; then
+        return 0
     fi
-    if apt-cache show tree-sitter-cli >/dev/null 2>&1; then
-        sudo apt-get install -y tree-sitter-cli
+
+    # awk (not head or sed q) reads all the output: see the SIGPIPE note in
+    # install_nerd_font_linux.
+    case "$manager" in
+        apt) candidate="$(apt-cache policy tree-sitter-cli 2>/dev/null |
+                          awk '$1 == "Candidate:" { print $2 }')" || candidate="" ;;
+        dnf) candidate="$(dnf -q repoquery --latest-limit=1 --queryformat '%{version}\n' tree-sitter-cli 2>/dev/null |
+                          awk 'NF && !seen { print; seen = 1 }')" || candidate="" ;;
+    esac
+    if version_at_least "$candidate" "$TREESITTER_MIN_VERSION"; then
+        info "Installing tree-sitter-cli $candidate with $manager"
+        case "$manager" in
+            apt) sudo apt-get install -y tree-sitter-cli ;;
+            dnf) sudo dnf install -y tree-sitter-cli ;;
+        esac || warn "Could not install tree-sitter-cli with $manager."
+        return 0
+    fi
+
+    if command -v tree-sitter >/dev/null 2>&1; then
+        warn "$(command -v tree-sitter) is older than $TREESITTER_MIN_VERSION or does not run, and $manager has nothing newer." \
+             "Remove it so LazyVim can install its own through mason" \
+             "(if an earlier run of this script put it there: sudo npm rm -g tree-sitter-cli)."
     else
-        info "tree-sitter-cli not in apt; installing via npm"
-        sudo npm install -g tree-sitter-cli
+        info "No tree-sitter CLI $TREESITTER_MIN_VERSION+ available from $manager; LazyVim installs it through mason when nvim first starts"
+    fi
+    glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null)" || glibc=""
+    glibc="${glibc#glibc }"
+    if [ -n "$glibc" ] && ! version_at_least "$glibc" 2.39; then
+        warn "glibc $glibc is older than 2.39, which the upstream tree-sitter binaries (mason's included) need." \
+             "Treesitter parsers will not install until the CLI is built from source: cargo install --locked tree-sitter-cli"
     fi
 }
 
@@ -128,13 +187,14 @@ link_fdfind() {
     fi
 }
 
-# LazyVim (as locked in lazy-lock.json) needs Neovim 0.11.2+, which not every
-# distro repo has caught up to (Debian stable, RHEL/EPEL). When the packaged
-# build is too old or missing, fall back to the official release tarball in
-# ~/.local/opt/nvim, like the starship fallback. The release binaries need
-# glibc 2.31+, so ancient distros still end up with the warning.
+# The plugins locked in lazy-lock.json (nvim-treesitter) need Neovim 0.12+,
+# which not every distro repo has caught up to (Debian stable, Ubuntu LTS,
+# RHEL/EPEL). When the packaged build is too old or missing, fall back to the
+# official release tarball in ~/.local/opt/nvim, like the starship fallback.
+# The release binaries need glibc 2.34+, so older distros still end up with
+# the warning.
 nvim_is_current() {
-    "$1" --headless -u NONE -i NONE -n -c 'if has("nvim-0.11.2") | q | else | cq | endif' >/dev/null 2>&1
+    "$1" --headless -u NONE -i NONE -n -c 'if has("nvim-0.12") | q | else | cq | endif' >/dev/null 2>&1
 }
 
 install_neovim_fallback() {
@@ -152,13 +212,13 @@ install_neovim_fallback() {
     case "$arch" in
         x86_64)        asset=nvim-linux-x86_64.tar.gz ;;
         aarch64|arm64) asset=nvim-linux-arm64.tar.gz ;;
-        *)  warn "Packaged Neovim is older than 0.11.2 and there is no release tarball" \
+        *)  warn "Packaged Neovim is older than 0.12 and there is no release tarball" \
                  "for $arch; the LazyVim config may not work. Build a newer Neovim:" \
                  "https://github.com/neovim/neovim/blob/master/BUILD.md"
             return ;;
     esac
 
-    info "Packaged Neovim is missing or older than 0.11.2; installing the latest release to ~/.local/opt/nvim"
+    info "Packaged Neovim is missing or older than 0.12; installing the latest release to ~/.local/opt/nvim"
     tmp="$(mktemp -d)"
     if curl -fsSL "https://github.com/neovim/neovim/releases/latest/download/$asset" |
            tar -xzf - -C "$tmp"; then
@@ -166,8 +226,16 @@ install_neovim_fallback() {
         mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
         mv "$tmp/${asset%.tar.gz}" "$HOME/.local/opt/nvim"
         ln -sf "$HOME/.local/opt/nvim/bin/nvim" "$HOME/.local/bin/nvim"
+        # A binary that cannot start here (glibc too old) would sit first on
+        # PATH and hide the packaged nvim, so don't leave it behind.
+        if ! nvim_is_current "$HOME/.local/bin/nvim"; then
+            rm -rf "$HOME/.local/opt/nvim" "$HOME/.local/bin/nvim"
+            warn "The Neovim release binary does not run on this system (it needs glibc 2.34+); removed it again." \
+                 "The LazyVim config may not work (needs 0.12+). Builds for older glibc:" \
+                 "https://github.com/neovim/neovim-releases"
+        fi
     else
-        warn "Neovim download failed; the LazyVim config may not work (needs 0.11.2+)." \
+        warn "Neovim download failed; the LazyVim config may not work (needs 0.12+)." \
              "Install a newer release from https://github.com/neovim/neovim/releases"
     fi
     rm -rf "$tmp"
@@ -225,19 +293,13 @@ install_apt_packages() {
         python3 python3-venv build-essential unzip curl fzf \
         zsh zsh-autosuggestions zsh-syntax-highlighting
     install_apt_optional git-delta gh zoxide
-    install_treesitter_cli
+    install_treesitter_cli apt
     install_starship_apt
     link_fdfind
 }
 
-install_ubuntu() {
-    info "Installing packages with apt (Neovim from ppa:neovim-ppa/unstable)"
-    sudo apt-get update
-    sudo apt-get install -y software-properties-common
-    sudo add-apt-repository -y ppa:neovim-ppa/unstable
-    install_apt_packages
-}
-
+# Debian, Ubuntu and their derivatives. apt's Neovim is usually too old; the
+# release-tarball fallback in main covers that.
 install_debian() {
     info "Installing packages with apt"
     sudo apt-get update
@@ -258,8 +320,7 @@ install_linux() {
 
     case "${ID:-} ${ID_LIKE:-}" in
         *fedora*|*rhel*)   install_fedora ;;
-        ubuntu*)           install_ubuntu ;;
-        *debian*)          install_debian ;;
+        *debian*|*ubuntu*) install_debian ;;
         *arch*)            install_arch ;;
         *) die "Unsupported distribution '${ID:-unknown}'. Install git, stow, neovim, node, ripgrep, fd, tree-sitter, gh, python3, starship, zsh (plus zsh-autosuggestions and zsh-syntax-highlighting), and a C compiler manually, then run: stow ${STOW_PACKAGES[*]}" ;;
     esac
@@ -456,19 +517,20 @@ export_nvim_to_host() {
 # sudo chsh avoids the password prompt (sudo is already primed from the
 # package install) and behaves the same on every supported distro.
 set_default_shell_zsh() {
-    local zsh current
+    # USER is unset in some containers.
+    local zsh current user="${USER:-$(id -un)}"
     zsh="$(command -v zsh)" || { warn "zsh not found; leaving login shell unchanged."; return 0; }
 
-    current="$(getent passwd "$USER" | cut -d: -f7)" || current=""
+    current="$(getent passwd "$user" | cut -d: -f7)" || current=""
     [ "$current" = "$zsh" ] && return 0
 
     grep -qx "$zsh" /etc/shells 2>/dev/null ||
         warn "$zsh is not listed in /etc/shells; chsh may refuse it."
 
     info "Changing login shell to $zsh (was ${current:-unknown})"
-    if ! sudo chsh -s "$zsh" "$USER"; then
+    if ! sudo chsh -s "$zsh" "$user"; then
         warn "Could not change the login shell (directory account?)." \
-             "Run manually: sudo usermod -s $zsh $USER"
+             "Run manually: sudo usermod -s $zsh $user"
     fi
 }
 
@@ -692,6 +754,7 @@ main() {
     OS="$(uname -s)"
     STOW_PACKAGES=(gitconfig gitignore nvim shell starship)
     DELTA_VERSION=0.19.2
+    TREESITTER_MIN_VERSION=0.26.1
     ZSHRC_BACKUP=""
     ZPROFILE_BACKUP=""
     ENVIRONMENT=normal
