@@ -75,7 +75,33 @@ Setting it up goes:
 4. In `dev`, run `"$DISTROBOX_HOST_HOME/dotfiles/install.sh"`, because `~/dotfiles` isn't linked into `dev` until that first run.
 5. In Ptyxis, make profiles with the custom commands `distrobox enter main` and `distrobox enter dev`. Ptyxis's own container menu can open a non-login shell, which skips the config.
 
-To move the boxes to a new Fedora release, rebuild them instead of upgrading in place: `./silverblue/assemble.sh --replace`, then re-run `install.sh` in each one. A rebuild keeps the home (and `~/distrobox/dev`) but wipes every package, including ones you installed yourself with `dnf install`. To keep one, add it to the box's `additional_packages` in `distrobox.ini` or reinstall it after (`dnf history list` shows what you installed).
+To move the boxes to a new Fedora release, rebuild them instead of upgrading in place. A rebuild keeps the home (and `~/distrobox/dev`) but wipes everything else: every package, including ones you installed yourself with `dnf install`, and any repos you added. Save those first:
+
+1. In each box, save the packages and repos you added. Both land in that box's home:
+
+   ```sh
+   dnf repoquery --installed --userinstalled --queryformat '%{name}\n' | sort |
+       comm -13 ~/.dnf-baseline.txt - > ~/dnf-packages.txt
+   rm -rf ~/dnf-repos && mkdir ~/dnf-repos
+   for f in /etc/yum.repos.d/*.repo; do
+       rpm -qf "$f" >/dev/null 2>&1 || cp "$f" ~/dnf-repos/
+   done
+   ```
+
+   `~/.dnf-baseline.txt` lists what a fresh box has (step 3 writes it). If it doesn't exist yet, `touch` it first: the saved list then holds every package, which still works, it's just long.
+
+2. On the host, rebuild: `./silverblue/assemble.sh --replace`
+3. In each box, re-run `~/dotfiles/install.sh`, then record the new baseline and put your repos and packages back, in this order:
+
+   ```sh
+   dnf repoquery --installed --userinstalled --queryformat '%{name}\n' | sort > ~/.dnf-baseline.txt
+   sudo cp -r ~/dnf-repos/. /etc/yum.repos.d/
+   sudo dnf install --skip-unavailable $(cat ~/dnf-packages.txt)
+   ```
+
+The baseline has to be written before the reinstall, or your own packages become part of it and the next save misses them. If `~/dnf-packages.txt` is empty there is nothing to reinstall. Repos that came from a release RPM (RPM Fusion) are not copied: re-run their install command before the `dnf install`. A package whose repo has nothing for the new release yet is skipped.
+
+Anything installed into the home (rustup, `cargo install`, uv, mason) needs none of this. For a package you want on every machine, add it to the box's `additional_packages` in `distrobox.ini` instead.
 
 Toolchains (rustup, Node, uv...) go in `dev`, not `main`, and projects go in `~/Dev`. The `.local` files and shell history are per home, so `dev` has its own. `dev`'s separate home is about clutter, not security, since the real home is still mounted in it.
 
