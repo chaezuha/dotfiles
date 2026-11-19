@@ -69,11 +69,10 @@ The host is immutable, so I keep it nearly bare (bash, distrobox, the font) and 
 
 Setting it up goes:
 
-1. On the host, run `./install.sh` (it only does the font and Ptyxis here), then `./silverblue/host.sh` to layer distrobox, then reboot.
+1. On the host, run `./install.sh` (it only does the font here), then `./silverblue/host.sh` to layer distrobox, then reboot.
 2. Run `./silverblue/assemble.sh` to create both boxes.
 3. In `main`, run `~/dotfiles/install.sh`. This also exports `nvim` to the host, so it works from a plain terminal.
 4. In `dev`, run `"$DISTROBOX_HOST_HOME/dotfiles/install.sh"`, because `~/dotfiles` isn't linked into `dev` until that first run.
-5. In Ptyxis, make profiles with the custom commands `distrobox enter main` and `distrobox enter dev`. Ptyxis's own container menu can open a non-login shell, which skips the config.
 
 To move the boxes to a new Fedora release, rebuild them instead of upgrading in place. A rebuild keeps the home (and `~/distrobox/dev`) but wipes everything else: every package, including ones you installed yourself with `dnf install`, and any repos you added. Save those first:
 

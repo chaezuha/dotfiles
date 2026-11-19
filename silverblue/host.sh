@@ -19,7 +19,7 @@ fi
 cat <<'STEPS'
 
 Next steps (if you haven't yet, run ./install.sh on the host first: the boxes
-skip the font and Ptyxis setup):
+skip the font setup):
   1. Reboot (only needed if distrobox was just layered)
   2. ./silverblue/assemble.sh
   3. distrobox enter main, then: ~/dotfiles/install.sh

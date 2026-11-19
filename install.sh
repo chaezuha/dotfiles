@@ -374,19 +374,6 @@ install_nerd_font_linux() {
     fc-cache -f "$fontdir"
 }
 
-# Point Ptyxis (GNOME's terminal) at the nerd font, but only if Ptyxis and
-# its gsettings schema actually exist on this machine.
-configure_ptyxis() {
-    command -v ptyxis >/dev/null 2>&1 || return 0
-    command -v gsettings >/dev/null 2>&1 || return 0
-    # Plain grep, not -q: see the SIGPIPE note in install_nerd_font_linux.
-    gsettings list-schemas 2>/dev/null | grep -x 'org.gnome.Ptyxis' >/dev/null || return 0
-
-    info "Setting Ptyxis font to JetBrainsMono Nerd Font 13"
-    gsettings set org.gnome.Ptyxis use-system-font false
-    gsettings set org.gnome.Ptyxis font-name 'JetBrainsMono Nerd Font 13'
-}
-
 # rpm-ostree systems (Silverblue, Kinoite, ...) create this at boot. It is not
 # visible inside a distrobox, but detect_environment checks for a box first.
 is_ostree_booted() {
@@ -426,16 +413,15 @@ print_host_bashrc_snippet() {
 SNIPPET
 }
 
-# On an rpm-ostree host only the font and terminal live on the host; packages,
-# stow and git setup happen inside the distroboxes (see distrobox.ini).
+# On an rpm-ostree host only the font lives on the host; packages, stow and
+# git setup happen inside the distroboxes (see distrobox.ini).
 setup_ostree_host() {
-    info "rpm-ostree host detected; setting up only the font and Ptyxis here"
+    info "rpm-ostree host detected; setting up only the font here"
     if command -v unzip >/dev/null 2>&1 && command -v fc-list >/dev/null 2>&1; then
         install_nerd_font_linux
     else
         warn "unzip or fc-list missing on the host; skipping JetBrainsMono Nerd Font install."
     fi
-    configure_ptyxis
 
     cat <<EOF
 
@@ -446,9 +432,7 @@ Next steps:
   4. distrobox enter main, then: ~/dotfiles/install.sh
   5. distrobox enter dev, then:  "\$DISTROBOX_HOST_HOME/dotfiles/install.sh"
      (~/dotfiles only exists in dev after this first run)
-  6. In Ptyxis, make a default profile with the custom command
-     'distrobox enter main' and a second one with 'distrobox enter dev'
-  7. Optional: so git works in a plain host terminal, add to ~/.bashrc:
+  6. Optional: so git works in a plain host terminal, add to ~/.bashrc:
 
 EOF
     print_host_bashrc_snippet
@@ -769,10 +753,9 @@ main() {
                 install_linux
                 install_neovim_fallback
                 install_delta_fallback
-                # Font and terminal belong to the host, not to a distrobox.
+                # The font belongs to the host, not to a distrobox.
                 if [ "$ENVIRONMENT" = normal ]; then
                     install_nerd_font_linux
-                    configure_ptyxis
                 fi
                 set_default_shell_zsh ;;
         *)      die "Unsupported OS: $OS" ;;

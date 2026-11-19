@@ -399,21 +399,19 @@ test_ostree_host_main() {
     unzip() { :; }
     fc-list() { :; }
     install_nerd_font_linux() { printf 'font\n' >>"$events"; }
-    configure_ptyxis() { printf 'ptyxis\n' >>"$events"; }
     main >"$HOME/out.log"
     assert test ! -e "$HOME/forbidden"
-    printf 'font\nptyxis\n' >"$HOME/expected"
+    printf 'font\n' >"$HOME/expected"
     assert cmp "$HOME/expected" "$events"
     assert grep -F 'silverblue/host.sh' "$HOME/out.log"
     assert grep -F 'silverblue/assemble.sh' "$HOME/out.log"
     assert grep -F 'git() { command git -c core.pager=less -c interactive.diffFilter=cat "$@"; }' "$HOME/out.log"
-    # Without unzip the font is skipped with a warning; Ptyxis still runs.
+    # Without unzip the font is skipped with a warning.
     rm "$events"
     unset -f unzip
     PATH="$(bare_path cat dirname)" main >/dev/null 2>"$HOME/err.log"
     assert grep -F 'skipping JetBrainsMono' "$HOME/err.log"
-    printf 'ptyxis\n' >"$HOME/expected"
-    assert cmp "$HOME/expected" "$events"
+    assert test ! -e "$events"
 }
 
 test_nerd_font_prunes_extra_faces() {
@@ -456,7 +454,6 @@ test_distrobox_main_modes() {
     install_delta_fallback() { :; }
     set_default_shell_zsh() { printf 'shell\n' >>"$events"; }
     install_nerd_font_linux() { forbidden install_nerd_font_linux; }
-    configure_ptyxis() { forbidden configure_ptyxis; }
     setup_git_credential_helper() { :; }
     stow_packages() { printf 'stow\n' >>"$events"; }
     link_box_home_paths() { printf 'links\n' >>"$events"; }
