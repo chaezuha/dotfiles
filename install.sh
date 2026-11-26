@@ -5,132 +5,138 @@
 # sets up the font and terminal; the rest runs inside distroboxes. Safe to re-run.
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+die() {
+  printf '\033[1;31merror:\033[0m %s\n' "$*" >&2
+  exit 1
+}
 
 install_macos() {
-    command -v brew >/dev/null 2>&1 ||
-        die "Homebrew is required on macOS. Install it from https://brew.sh and re-run."
+  command -v brew >/dev/null 2>&1 ||
+    die "Homebrew is required on macOS. Install it from https://brew.sh and re-run."
 
-    info "Installing packages with Homebrew"
-    local pkg
-    for pkg in git stow neovim node ripgrep fd tree-sitter-cli gh \
-               fzf zoxide git-delta starship \
-               zsh-autosuggestions zsh-syntax-highlighting; do
-        brew list "$pkg" >/dev/null 2>&1 || brew install "$pkg"
-    done
-    for pkg in ghostty font-jetbrains-mono-nerd-font; do
-        brew list --cask "$pkg" >/dev/null 2>&1 || brew install --cask "$pkg"
-    done
+  info "Installing packages with Homebrew"
+  local pkg
+  for pkg in git stow neovim node ripgrep fd tree-sitter-cli gh \
+    fzf zoxide git-delta starship \
+    zsh-autosuggestions zsh-syntax-highlighting; do
+    brew list "$pkg" >/dev/null 2>&1 || brew install "$pkg"
+  done
+  for pkg in ghostty font-jetbrains-mono-nerd-font; do
+    brew list --cask "$pkg" >/dev/null 2>&1 || brew install --cask "$pkg"
+  done
 
-    STOW_PACKAGES+=(ghostty)
+  STOW_PACKAGES+=(ghostty)
 }
 
 install_fedora() {
-    info "Installing packages with dnf"
+  info "Installing packages with dnf"
 
-    # RHEL clones need EPEL for stow, ripgrep, fd, fzf, zoxide, git-delta and
-    # the zsh plugins. Rocky/Alma ship epel-release in their own repos; RHEL
-    # proper only has it as a release RPM from the Fedora project.
-    # Fedora derivatives (Nobara, Bazzite, ...) have their own ID but keep
-    # Fedora's PLATFORM_ID (platform:f43), and EPEL is not for them either.
-    # ($ID, $VERSION_ID and $PLATFORM_ID were set when install_linux sourced
-    # /etc/os-release.)
-    case "${ID:-}:${PLATFORM_ID:-}" in
-        fedora:*|*:platform:f*) ;;
-        *)  sudo dnf install -y epel-release 2>/dev/null ||
-                { [ "${ID:-}" = rhel ] &&
-                  sudo dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${VERSION_ID%%.*}.noarch.rpm"; } ||
-                warn "Could not enable EPEL; packages it provides (stow, ripgrep, fd, fzf, ...) may be skipped below." ;;
-    esac
+  # RHEL clones need EPEL for stow, ripgrep, fd, fzf, zoxide, git-delta and
+  # the zsh plugins. Rocky/Alma ship epel-release in their own repos; RHEL
+  # proper only has it as a release RPM from the Fedora project.
+  # Fedora derivatives (Nobara, Bazzite, ...) have their own ID but keep
+  # Fedora's PLATFORM_ID (platform:f43), and EPEL is not for them either.
+  # ($ID, $VERSION_ID and $PLATFORM_ID were set when install_linux sourced
+  # /etc/os-release.)
+  case "${ID:-}:${PLATFORM_ID:-}" in
+  fedora:* | *:platform:f*) ;;
+  *) sudo dnf install -y epel-release 2>/dev/null ||
+    { [ "${ID:-}" = rhel ] &&
+      sudo dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${VERSION_ID%%.*}.noarch.rpm"; } ||
+    warn "Could not enable EPEL; packages it provides (stow, ripgrep, fd, fzf, ...) may be skipped below." ;;
+  esac
 
-    # Only what base RHEL-family repos and Fedora both carry.
-    sudo dnf install -y git nodejs npm python3 gcc unzip zsh
-    # Minimal RHEL-family images ship curl-minimal, which conflicts with the
-    # curl package; either one provides the command, so only install when absent.
-    command -v curl >/dev/null 2>&1 || sudo dnf install -y curl
+  # Only what base RHEL-family repos and Fedora both carry.
+  sudo dnf install -y git nodejs npm python3 gcc unzip zsh
+  # Minimal RHEL-family images ship curl-minimal, which conflicts with the
+  # curl package; either one provides the command, so only install when absent.
+  command -v curl >/dev/null 2>&1 || sudo dnf install -y curl
 
-    # Inside a distrobox (Silverblue) nothing else provides Java, and the
-    # shared nvim config (Java extra, google-java-format) needs it. 25 is the
-    # current LTS; -devel brings javac for the dev box.
-    if [ -n "${CONTAINER_ID:-}" ]; then
-        sudo dnf install -y java-25-openjdk-devel ||
-            warn "Could not install java-25-openjdk-devel; nvim's Java tooling will not work."
-    fi
+  # Inside a distrobox (Silverblue) nothing else provides Java, and the
+  # shared nvim config (Java extra, google-java-format) needs it. 25 is the
+  # current LTS; -devel brings javac for the dev box.
+  if [ -n "${CONTAINER_ID:-}" ]; then
+    sudo dnf install -y java-25-openjdk-devel ||
+      warn "Could not install java-25-openjdk-devel; nvim's Java tooling will not work."
+  fi
 
-    # These are not packaged everywhere (RHEL/EPEL has no gh, and without EPEL
-    # most of them are missing) and one unknown name fails the whole dnf
-    # transaction, so install them one at a time and keep going when one is
-    # missing. Neovim has a release-tarball fallback in main.
-    local pkg
-    for pkg in stow neovim ripgrep fd-find gh fzf zoxide git-delta \
-               zsh-autosuggestions zsh-syntax-highlighting; do
-        sudo dnf install -y "$pkg" 2>/dev/null ||
-            warn "$pkg is not available from dnf on this system; skipping."
-    done
-    command -v stow >/dev/null 2>&1 ||
-        die "stow is required but not available from dnf. On RHEL-family systems it comes from EPEL:" \
-            "https://docs.fedoraproject.org/en-US/epel/ (enable it, then re-run)."
+  # These are not packaged everywhere (RHEL/EPEL has no gh, and without EPEL
+  # most of them are missing) and one unknown name fails the whole dnf
+  # transaction, so install them one at a time and keep going when one is
+  # missing. Neovim has a release-tarball fallback in main.
+  local pkg
+  for pkg in stow neovim ripgrep fd-find gh fzf zoxide git-delta \
+    zsh-autosuggestions zsh-syntax-highlighting; do
+    sudo dnf install -y "$pkg" 2>/dev/null ||
+      warn "$pkg is not available from dnf on this system; skipping."
+  done
+  command -v stow >/dev/null 2>&1 ||
+    die "stow is required but not available from dnf. On RHEL-family systems it comes from EPEL:" \
+      "https://docs.fedoraproject.org/en-US/epel/ (enable it, then re-run)."
 
-    # Not in the official Fedora or RHEL/EPEL repos, but try in case a repo provides it.
-    sudo dnf install -y starship 2>/dev/null || install_starship_fallback
+  # Not in the official Fedora or RHEL/EPEL repos, but try in case a repo provides it.
+  sudo dnf install -y starship 2>/dev/null || install_starship_fallback
 
-    install_treesitter_cli dnf
-    command -v gh >/dev/null 2>&1 ||
-        warn "gh is not in RHEL/EPEL. To install it, add GitHub's repo:" \
-             "https://cli.github.com/packages/rpm/gh-cli.repo"
+  install_treesitter_cli dnf
+  command -v gh >/dev/null 2>&1 ||
+    warn "gh is not in RHEL/EPEL. To install it, add GitHub's repo:" \
+      "https://cli.github.com/packages/rpm/gh-cli.repo"
 }
 
 # Some packages (e.g. git-delta) only exist in apt on newer Debian/Ubuntu
 # releases; install what's available and warn about the rest.
 install_apt_optional() {
-    local pkg
-    for pkg in "$@"; do
-        if apt-cache show "$pkg" >/dev/null 2>&1; then
-            sudo apt-get install -y "$pkg"
-        else
-            warn "$pkg is not available in apt on this release; skipping."
-        fi
-    done
+  local pkg
+  for pkg in "$@"; do
+    if apt-cache show "$pkg" >/dev/null 2>&1; then
+      sudo apt-get install -y "$pkg"
+    else
+      warn "$pkg is not available in apt on this release; skipping."
+    fi
+  done
 }
 
 # starship is in the Arch repos but not in Fedora (COPR only), RHEL/EPEL, and only in
 # the newest Debian/Ubuntu releases; fall back to the official installer,
 # which drops a single binary into ~/.local/bin (already first on PATH).
 install_starship_fallback() {
-    if command -v starship >/dev/null 2>&1; then
-        return
-    fi
-    info "starship not available from the package manager; using the official installer"
-    # The installer refuses a -b directory that doesn't exist yet (fresh installs).
-    mkdir -p "$HOME/.local/bin"
-    curl -sS https://starship.rs/install.sh | sh -s -- -y -b "$HOME/.local/bin" ||
-        warn "starship install failed; the shell config falls back to a plain prompt."
+  if command -v starship >/dev/null 2>&1; then
+    return
+  fi
+  info "starship not available from the package manager; using the official installer"
+  # The installer refuses a -b directory that doesn't exist yet (fresh installs).
+  mkdir -p "$HOME/.local/bin"
+  curl -sS https://starship.rs/install.sh | sh -s -- -y -b "$HOME/.local/bin" ||
+    warn "starship install failed; the shell config falls back to a plain prompt."
 }
 
 # True when dotted version $1 is at least $2 (first three components).
 # An epoch and anything after the digits and dots (apt's -3build1) is ignored;
 # an empty or non-numeric $1 is never enough.
 version_at_least() {
-    local hp wp i h w
-    IFS=. read -r -a hp <<<"$(v="${1##*:}"; printf '%s' "${v%%[!0-9.]*}")"
-    IFS=. read -r -a wp <<<"${2%%[!0-9.]*}"
-    [ "${#hp[@]}" -gt 0 ] || return 1
-    for i in 0 1 2; do
-        h="${hp[$i]:-0}"
-        w="${wp[$i]:-0}"
-        if [ "$((10#$h))" -gt "$((10#$w))" ]; then return 0; fi
-        if [ "$((10#$h))" -lt "$((10#$w))" ]; then return 1; fi
-    done
-    return 0
+  local hp wp i h w
+  IFS=. read -r -a hp <<<"$(
+    v="${1##*:}"
+    printf '%s' "${v%%[!0-9.]*}"
+  )"
+  IFS=. read -r -a wp <<<"${2%%[!0-9.]*}"
+  [ "${#hp[@]}" -gt 0 ] || return 1
+  for i in 0 1 2; do
+    h="${hp[$i]:-0}"
+    w="${wp[$i]:-0}"
+    if [ "$((10#$h))" -gt "$((10#$w))" ]; then return 0; fi
+    if [ "$((10#$h))" -lt "$((10#$w))" ]; then return 1; fi
+  done
+  return 0
 }
 
 # A tree-sitter that is missing, too old, or cannot run (wrong glibc) all
 # count as not current.
 treesitter_is_current() {
-    local out
-    out="$(tree-sitter --version 2>/dev/null)" || return 1
-    [[ "$out" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]] || return 1
-    version_at_least "${BASH_REMATCH[1]}" "$TREESITTER_MIN_VERSION"
+  local out
+  out="$(tree-sitter --version 2>/dev/null)" || return 1
+  [[ "$out" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]] || return 1
+  version_at_least "${BASH_REMATCH[1]}" "$TREESITTER_MIN_VERSION"
 }
 
 # nvim-treesitter (as locked in lazy-lock.json) needs a recent tree-sitter CLI
@@ -139,52 +145,52 @@ treesitter_is_current() {
 # own copy through mason when no tree-sitter is on PATH, so a stale one is
 # worse than none. npm is not an option; nvim-treesitter rejects it.
 install_treesitter_cli() {
-    local manager="$1" candidate="" glibc
-    if treesitter_is_current; then
-        return 0
-    fi
+  local manager="$1" candidate="" glibc
+  if treesitter_is_current; then
+    return 0
+  fi
 
-    # awk (not head or sed q) reads all the output: see the SIGPIPE note in
-    # install_nerd_font_linux.
+  # awk (not head or sed q) reads all the output: see the SIGPIPE note in
+  # install_nerd_font_linux.
+  case "$manager" in
+  apt) candidate="$(apt-cache policy tree-sitter-cli 2>/dev/null |
+    awk '$1 == "Candidate:" { print $2 }')" || candidate="" ;;
+  dnf) candidate="$(dnf -q repoquery --latest-limit=1 --queryformat '%{version}\n' tree-sitter-cli 2>/dev/null |
+    awk 'NF && !seen { print; seen = 1 }')" || candidate="" ;;
+  esac
+  if version_at_least "$candidate" "$TREESITTER_MIN_VERSION"; then
+    info "Installing tree-sitter-cli $candidate with $manager"
     case "$manager" in
-        apt) candidate="$(apt-cache policy tree-sitter-cli 2>/dev/null |
-                          awk '$1 == "Candidate:" { print $2 }')" || candidate="" ;;
-        dnf) candidate="$(dnf -q repoquery --latest-limit=1 --queryformat '%{version}\n' tree-sitter-cli 2>/dev/null |
-                          awk 'NF && !seen { print; seen = 1 }')" || candidate="" ;;
-    esac
-    if version_at_least "$candidate" "$TREESITTER_MIN_VERSION"; then
-        info "Installing tree-sitter-cli $candidate with $manager"
-        case "$manager" in
-            apt) sudo apt-get install -y tree-sitter-cli ;;
-            dnf) sudo dnf install -y tree-sitter-cli ;;
-        esac || warn "Could not install tree-sitter-cli with $manager."
-        return 0
-    fi
+    apt) sudo apt-get install -y tree-sitter-cli ;;
+    dnf) sudo dnf install -y tree-sitter-cli ;;
+    esac || warn "Could not install tree-sitter-cli with $manager."
+    return 0
+  fi
 
-    if command -v tree-sitter >/dev/null 2>&1; then
-        warn "$(command -v tree-sitter) is older than $TREESITTER_MIN_VERSION or does not run, and $manager has nothing newer." \
-             "Remove it so LazyVim can install its own through mason" \
-             "(if an earlier run of this script put it there: sudo npm rm -g tree-sitter-cli)."
-    else
-        info "No tree-sitter CLI $TREESITTER_MIN_VERSION+ available from $manager; LazyVim installs it through mason when nvim first starts"
-    fi
-    glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null)" || glibc=""
-    glibc="${glibc#glibc }"
-    if [ -n "$glibc" ] && ! version_at_least "$glibc" 2.39; then
-        warn "glibc $glibc is older than 2.39, which the upstream tree-sitter binaries (mason's included) need." \
-             "Treesitter parsers will not install until the CLI is built from source: cargo install --locked tree-sitter-cli"
-    fi
+  if command -v tree-sitter >/dev/null 2>&1; then
+    warn "$(command -v tree-sitter) is older than $TREESITTER_MIN_VERSION or does not run, and $manager has nothing newer." \
+      "Remove it so LazyVim can install its own through mason" \
+      "(if an earlier run of this script put it there: sudo npm rm -g tree-sitter-cli)."
+  else
+    info "No tree-sitter CLI $TREESITTER_MIN_VERSION+ available from $manager; LazyVim installs it through mason when nvim first starts"
+  fi
+  glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null)" || glibc=""
+  glibc="${glibc#glibc }"
+  if [ -n "$glibc" ] && ! version_at_least "$glibc" 2.39; then
+    warn "glibc $glibc is older than 2.39, which the upstream tree-sitter binaries (mason's included) need." \
+      "Treesitter parsers will not install until the CLI is built from source: cargo install --locked tree-sitter-cli"
+  fi
 }
 
 # Debian and Ubuntu install fd's binary as fdfind. Symlink it to ~/.local/bin/fd
 # so tools that call the binary directly (Neovim pickers, fzf) can find it too;
 # the alias in aliases.sh only covers interactive shells.
 link_fdfind() {
-    if ! command -v fd >/dev/null 2>&1 && command -v fdfind >/dev/null 2>&1; then
-        info "Symlinking fdfind to ~/.local/bin/fd"
-        mkdir -p "$HOME/.local/bin"
-        ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd"
-    fi
+  if ! command -v fd >/dev/null 2>&1 && command -v fdfind >/dev/null 2>&1; then
+    info "Symlinking fdfind to ~/.local/bin/fd"
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd"
+  fi
 }
 
 # The plugins locked in lazy-lock.json (nvim-treesitter) need Neovim 0.12+,
@@ -194,59 +200,61 @@ link_fdfind() {
 # The release binaries need glibc 2.34+, so older distros still end up with
 # the warning.
 nvim_is_current() {
-    "$1" --headless -u NONE -i NONE -n -c 'if has("nvim-0.12") | q | else | cq | endif' >/dev/null 2>&1
+  "$1" --headless -u NONE -i NONE -n -c 'if has("nvim-0.12") | q | else | cq | endif' >/dev/null 2>&1
 }
 
 install_neovim_fallback() {
-    # Accept the packaged nvim or a previously installed fallback copy
-    # (~/.local/bin may not be on PATH yet during a first run).
-    if command -v nvim >/dev/null 2>&1 && nvim_is_current nvim; then
-        return
-    fi
-    if [ -x "$HOME/.local/bin/nvim" ] && nvim_is_current "$HOME/.local/bin/nvim"; then
-        return
-    fi
+  # Accept the packaged nvim or a previously installed fallback copy
+  # (~/.local/bin may not be on PATH yet during a first run).
+  if command -v nvim >/dev/null 2>&1 && nvim_is_current nvim; then
+    return
+  fi
+  if [ -x "$HOME/.local/bin/nvim" ] && nvim_is_current "$HOME/.local/bin/nvim"; then
+    return
+  fi
 
-    local arch asset tmp
-    arch="$(uname -m)"
-    case "$arch" in
-        x86_64)        asset=nvim-linux-x86_64.tar.gz ;;
-        aarch64|arm64) asset=nvim-linux-arm64.tar.gz ;;
-        *)  warn "Packaged Neovim is older than 0.12 and there is no release tarball" \
-                 "for $arch; the LazyVim config may not work. Build a newer Neovim:" \
-                 "https://github.com/neovim/neovim/blob/master/BUILD.md"
-            return ;;
-    esac
+  local arch asset tmp
+  arch="$(uname -m)"
+  case "$arch" in
+  x86_64) asset=nvim-linux-x86_64.tar.gz ;;
+  aarch64 | arm64) asset=nvim-linux-arm64.tar.gz ;;
+  *)
+    warn "Packaged Neovim is older than 0.12 and there is no release tarball" \
+      "for $arch; the LazyVim config may not work. Build a newer Neovim:" \
+      "https://github.com/neovim/neovim/blob/master/BUILD.md"
+    return
+    ;;
+  esac
 
-    info "Packaged Neovim is missing or older than 0.12; installing the latest release to ~/.local/opt/nvim"
-    tmp="$(mktemp -d)"
-    if curl -fsSL "https://github.com/neovim/neovim/releases/latest/download/$asset" |
-           tar -xzf - -C "$tmp"; then
-        rm -rf "$HOME/.local/opt/nvim"
-        mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
-        mv "$tmp/${asset%.tar.gz}" "$HOME/.local/opt/nvim"
-        ln -sf "$HOME/.local/opt/nvim/bin/nvim" "$HOME/.local/bin/nvim"
-        # A binary that cannot start here (glibc too old) would sit first on
-        # PATH and hide the packaged nvim, so don't leave it behind.
-        if ! nvim_is_current "$HOME/.local/bin/nvim"; then
-            rm -rf "$HOME/.local/opt/nvim" "$HOME/.local/bin/nvim"
-            warn "The Neovim release binary does not run on this system (it needs glibc 2.34+); removed it again." \
-                 "The LazyVim config may not work (needs 0.12+). Builds for older glibc:" \
-                 "https://github.com/neovim/neovim-releases"
-        fi
-    else
-        warn "Neovim download failed; the LazyVim config may not work (needs 0.12+)." \
-             "Install a newer release from https://github.com/neovim/neovim/releases"
+  info "Packaged Neovim is missing or older than 0.12; installing the latest release to ~/.local/opt/nvim"
+  tmp="$(mktemp -d)"
+  if curl -fsSL "https://github.com/neovim/neovim/releases/latest/download/$asset" |
+    tar -xzf - -C "$tmp"; then
+    rm -rf "$HOME/.local/opt/nvim"
+    mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
+    mv "$tmp/${asset%.tar.gz}" "$HOME/.local/opt/nvim"
+    ln -sf "$HOME/.local/opt/nvim/bin/nvim" "$HOME/.local/bin/nvim"
+    # A binary that cannot start here (glibc too old) would sit first on
+    # PATH and hide the packaged nvim, so don't leave it behind.
+    if ! nvim_is_current "$HOME/.local/bin/nvim"; then
+      rm -rf "$HOME/.local/opt/nvim" "$HOME/.local/bin/nvim"
+      warn "The Neovim release binary does not run on this system (it needs glibc 2.34+); removed it again." \
+        "The LazyVim config may not work (needs 0.12+). Builds for older glibc:" \
+        "https://github.com/neovim/neovim-releases"
     fi
-    rm -rf "$tmp"
+  else
+    warn "Neovim download failed; the LazyVim config may not work (needs 0.12+)." \
+      "Install a newer release from https://github.com/neovim/neovim/releases"
+  fi
+  rm -rf "$tmp"
 }
 
 install_starship_apt() {
-    if apt-cache show starship >/dev/null 2>&1; then
-        sudo apt-get install -y starship
-    else
-        install_starship_fallback
-    fi
+  if apt-cache show starship >/dev/null 2>&1; then
+    sudo apt-get install -y starship
+  else
+    install_starship_fallback
+  fi
 }
 
 # .gitconfig points git at delta unconditionally, but delta isn't packaged
@@ -255,129 +263,129 @@ install_starship_apt() {
 # ~/.gitconfig.local (included last, so it wins) so git isn't left invoking
 # a missing command.
 install_delta_fallback() {
-    if command -v delta >/dev/null 2>&1 || [ -x "$HOME/.local/bin/delta" ]; then
-        return
+  if command -v delta >/dev/null 2>&1 || [ -x "$HOME/.local/bin/delta" ]; then
+    return
+  fi
+
+  local arch target tmp
+  arch="$(uname -m)"
+  case "$arch" in
+  x86_64) target=x86_64-unknown-linux-musl ;;
+  aarch64 | arm64) target=aarch64-unknown-linux-gnu ;;
+  *) target="" ;;
+  esac
+
+  if [ -n "$target" ]; then
+    info "delta not packaged here; installing $DELTA_VERSION from GitHub releases to ~/.local/bin"
+    tmp="$(mktemp -d)"
+    if curl -fsSL "https://github.com/dandavison/delta/releases/download/$DELTA_VERSION/delta-$DELTA_VERSION-$target.tar.gz" |
+      tar -xzf - -C "$tmp"; then
+      mkdir -p "$HOME/.local/bin"
+      mv "$tmp/delta-$DELTA_VERSION-$target/delta" "$HOME/.local/bin/delta"
     fi
+    rm -rf "$tmp"
+    [ -x "$HOME/.local/bin/delta" ] && return
+  fi
 
-    local arch target tmp
-    arch="$(uname -m)"
-    case "$arch" in
-        x86_64)        target=x86_64-unknown-linux-musl ;;
-        aarch64|arm64) target=aarch64-unknown-linux-gnu ;;
-        *)             target="" ;;
-    esac
-
-    if [ -n "$target" ]; then
-        info "delta not packaged here; installing $DELTA_VERSION from GitHub releases to ~/.local/bin"
-        tmp="$(mktemp -d)"
-        if curl -fsSL "https://github.com/dandavison/delta/releases/download/$DELTA_VERSION/delta-$DELTA_VERSION-$target.tar.gz" |
-               tar -xzf - -C "$tmp"; then
-            mkdir -p "$HOME/.local/bin"
-            mv "$tmp/delta-$DELTA_VERSION-$target/delta" "$HOME/.local/bin/delta"
-        fi
-        rm -rf "$tmp"
-        [ -x "$HOME/.local/bin/delta" ] && return
-    fi
-
-    warn "delta unavailable; pointing git back at less in ~/.gitconfig.local." \
-         "Remove the core.pager/interactive.diffFilter overrides there once delta is installed."
-    git config --file "$HOME/.gitconfig.local" core.pager less
-    git config --file "$HOME/.gitconfig.local" interactive.diffFilter cat
+  warn "delta unavailable; pointing git back at less in ~/.gitconfig.local." \
+    "Remove the core.pager/interactive.diffFilter overrides there once delta is installed."
+  git config --file "$HOME/.gitconfig.local" core.pager less
+  git config --file "$HOME/.gitconfig.local" interactive.diffFilter cat
 }
 
 # Shared by Debian and Ubuntu; the caller has already run apt-get update.
 # gh and zoxide are missing from older releases (Debian 11, Ubuntu 20.04),
 # so they go through install_apt_optional instead of failing the install.
 install_apt_packages() {
-    sudo apt-get install -y git stow neovim nodejs npm ripgrep fd-find \
-        python3 python3-venv build-essential unzip curl fzf \
-        zsh zsh-autosuggestions zsh-syntax-highlighting
-    install_apt_optional git-delta gh zoxide
-    install_treesitter_cli apt
-    install_starship_apt
-    link_fdfind
+  sudo apt-get install -y git stow neovim nodejs npm ripgrep fd-find \
+    python3 python3-venv build-essential unzip curl fzf \
+    zsh zsh-autosuggestions zsh-syntax-highlighting
+  install_apt_optional git-delta gh zoxide
+  install_treesitter_cli apt
+  install_starship_apt
+  link_fdfind
 }
 
 # Debian, Ubuntu and their derivatives. apt's Neovim is usually too old; the
 # release-tarball fallback in main covers that.
 install_debian() {
-    info "Installing packages with apt"
-    sudo apt-get update
-    install_apt_packages
+  info "Installing packages with apt"
+  sudo apt-get update
+  install_apt_packages
 }
 
 install_arch() {
-    info "Installing packages with pacman"
-    sudo pacman -S --needed --noconfirm git stow neovim nodejs npm ripgrep fd python gcc unzip curl \
-        tree-sitter-cli github-cli fzf zoxide git-delta starship \
-        zsh zsh-autosuggestions zsh-syntax-highlighting
+  info "Installing packages with pacman"
+  sudo pacman -S --needed --noconfirm git stow neovim nodejs npm ripgrep fd python gcc unzip curl \
+    tree-sitter-cli github-cli fzf zoxide git-delta starship \
+    zsh zsh-autosuggestions zsh-syntax-highlighting
 }
 
 install_linux() {
-    [ -r /etc/os-release ] || die "Cannot detect Linux distribution (/etc/os-release missing)."
-    # shellcheck source=/dev/null
-    . /etc/os-release
+  [ -r /etc/os-release ] || die "Cannot detect Linux distribution (/etc/os-release missing)."
+  # shellcheck source=/dev/null
+  . /etc/os-release
 
-    case "${ID:-} ${ID_LIKE:-}" in
-        *fedora*|*rhel*)   install_fedora ;;
-        *debian*|*ubuntu*) install_debian ;;
-        *arch*)            install_arch ;;
-        *) die "Unsupported distribution '${ID:-unknown}'. Install git, stow, neovim, node, ripgrep, fd, tree-sitter, gh, python3, starship, zsh (plus zsh-autosuggestions and zsh-syntax-highlighting), and a C compiler manually, then run: stow ${STOW_PACKAGES[*]}" ;;
-    esac
+  case "${ID:-} ${ID_LIKE:-}" in
+  *fedora* | *rhel*) install_fedora ;;
+  *debian* | *ubuntu*) install_debian ;;
+  *arch*) install_arch ;;
+  *) die "Unsupported distribution '${ID:-unknown}'. Install git, stow, neovim, node, ripgrep, fd, tree-sitter, gh, python3, starship, zsh (plus zsh-autosuggestions and zsh-syntax-highlighting), and a C compiler manually, then run: stow ${STOW_PACKAGES[*]}" ;;
+  esac
 }
 
 # On macOS the font comes from a Homebrew cask; on Linux, download the
 # nerd-fonts release into the user font directory.
 install_nerd_font_linux() {
-    # Only the four faces a terminal uses. The release also ships Thin through
-    # ExtraBold under the same family name, and with those installed Pango can
-    # resolve 'JetBrainsMono Nerd Font' to an italic face.
-    local faces fontdir="$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
-    faces=(JetBrainsMonoNerdFont-{Regular,Bold,Italic,BoldItalic}.ttf)
-    if ! command -v fc-list >/dev/null 2>&1; then
-        warn "fontconfig not installed; skipping JetBrainsMono Nerd Font install."
-        return
+  # Only the four faces a terminal uses. The release also ships Thin through
+  # ExtraBold under the same family name, and with those installed Pango can
+  # resolve 'JetBrainsMono Nerd Font' to an italic face.
+  local faces fontdir="$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
+  faces=(JetBrainsMonoNerdFont-{Regular,Bold,Italic,BoldItalic}.ttf)
+  if ! command -v fc-list >/dev/null 2>&1; then
+    warn "fontconfig not installed; skipping JetBrainsMono Nerd Font install."
+    return
+  fi
+  # Earlier runs unzipped the whole release here; drop the extra faces.
+  if [ -d "$fontdir" ]; then
+    local face keep removed
+    keep=()
+    for face in "${faces[@]}"; do
+      keep+=(! -name "$face")
+    done
+    removed="$(find "$fontdir" -type f "${keep[@]}" -print -delete)"
+    if [ -n "$removed" ]; then
+      info "Removed extra JetBrainsMono Nerd Font styles"
+      fc-cache -f "$fontdir"
     fi
-    # Earlier runs unzipped the whole release here; drop the extra faces.
-    if [ -d "$fontdir" ]; then
-        local face keep removed
-        keep=()
-        for face in "${faces[@]}"; do
-            keep+=(! -name "$face")
-        done
-        removed="$(find "$fontdir" -type f "${keep[@]}" -print -delete)"
-        if [ -n "$removed" ]; then
-            info "Removed extra JetBrainsMono Nerd Font styles"
-            fc-cache -f "$fontdir"
-        fi
-    fi
-    # Plain grep (not -q) reads all of fc-list's output. grep -q exits at the
-    # first match, which can kill fc-list with SIGPIPE and, under pipefail,
-    # make the check fail even though the font is installed.
-    if fc-list | grep -i 'JetBrainsMono Nerd Font' >/dev/null; then
-        info "JetBrainsMono Nerd Font already installed"
-        return
-    fi
+  fi
+  # Plain grep (not -q) reads all of fc-list's output. grep -q exits at the
+  # first match, which can kill fc-list with SIGPIPE and, under pipefail,
+  # make the check fail even though the font is installed.
+  if fc-list | grep -i 'JetBrainsMono Nerd Font' >/dev/null; then
+    info "JetBrainsMono Nerd Font already installed"
+    return
+  fi
 
-    info "Installing JetBrainsMono Nerd Font to ~/.local/share/fonts"
-    local tmp
-    tmp="$(mktemp -d)"
-    if ! curl -fsSL -o "$tmp/JetBrainsMono.zip" \
-            "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip" ||
-       ! { mkdir -p "$fontdir" && unzip -oq "$tmp/JetBrainsMono.zip" "${faces[@]}" -d "$fontdir"; }; then
-        warn "JetBrainsMono Nerd Font download failed; prompt icons may not render." \
-             "Install it later from https://www.nerdfonts.com/font-downloads"
-        rm -rf "$tmp"
-        return 0
-    fi
+  info "Installing JetBrainsMono Nerd Font to ~/.local/share/fonts"
+  local tmp
+  tmp="$(mktemp -d)"
+  if ! curl -fsSL -o "$tmp/JetBrainsMono.zip" \
+    "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip" ||
+    ! { mkdir -p "$fontdir" && unzip -oq "$tmp/JetBrainsMono.zip" "${faces[@]}" -d "$fontdir"; }; then
+    warn "JetBrainsMono Nerd Font download failed; prompt icons may not render." \
+      "Install it later from https://www.nerdfonts.com/font-downloads"
     rm -rf "$tmp"
-    fc-cache -f "$fontdir"
+    return 0
+  fi
+  rm -rf "$tmp"
+  fc-cache -f "$fontdir"
 }
 
 # rpm-ostree systems (Silverblue, Kinoite, ...) create this at boot. It is not
 # visible inside a distrobox, but detect_environment checks for a box first.
 is_ostree_booted() {
-    [ -e /run/ostree-booted ]
+  [ -e /run/ostree-booted ]
 }
 
 # Where this run is happening (Linux only):
@@ -388,24 +396,24 @@ is_ostree_booted() {
 # distrobox sets CONTAINER_ID in every box, and DISTROBOX_HOST_HOME (the real
 # home) only in boxes with a custom home.
 detect_environment() {
-    if [ -n "${CONTAINER_ID:-}" ]; then
-        if [ -n "${DISTROBOX_HOST_HOME:-}" ]; then
-            echo distrobox-own
-        else
-            echo distrobox-shared
-        fi
-    elif is_ostree_booted; then
-        echo ostree-host
+  if [ -n "${CONTAINER_ID:-}" ]; then
+    if [ -n "${DISTROBOX_HOST_HOME:-}" ]; then
+      echo distrobox-own
     else
-        echo normal
+      echo distrobox-shared
     fi
+  elif is_ostree_booted; then
+    echo ostree-host
+  else
+    echo normal
+  fi
 }
 
 # Shown on the host by install.sh and documented in the README. The stowed
 # .gitconfig pages through delta, which only exists inside the boxes. A shell
 # function (not exported) keeps it from leaking into `distrobox enter`.
 print_host_bashrc_snippet() {
-    cat <<'SNIPPET'
+  cat <<'SNIPPET'
     # dotfiles: delta only exists inside the distroboxes.
     if [ -z "${CONTAINER_ID:-}" ] && ! command -v delta >/dev/null 2>&1; then
         git() { command git -c core.pager=less -c interactive.diffFilter=cat "$@"; }
@@ -416,14 +424,14 @@ SNIPPET
 # On an rpm-ostree host only the font lives on the host; packages, stow and
 # git setup happen inside the distroboxes (see distrobox.ini).
 setup_ostree_host() {
-    info "rpm-ostree host detected; setting up only the font here"
-    if command -v unzip >/dev/null 2>&1 && command -v fc-list >/dev/null 2>&1; then
-        install_nerd_font_linux
-    else
-        warn "unzip or fc-list missing on the host; skipping JetBrainsMono Nerd Font install."
-    fi
+  info "rpm-ostree host detected; setting up only the font here"
+  if command -v unzip >/dev/null 2>&1 && command -v fc-list >/dev/null 2>&1; then
+    install_nerd_font_linux
+  else
+    warn "unzip or fc-list missing on the host; skipping JetBrainsMono Nerd Font install."
+  fi
 
-    cat <<EOF
+  cat <<EOF
 
 Next steps:
   1. ./silverblue/host.sh                  (layers distrobox)
@@ -435,28 +443,28 @@ Next steps:
   6. Optional: so git works in a plain host terminal, add to ~/.bashrc:
 
 EOF
-    print_host_bashrc_snippet
+  print_host_bashrc_snippet
 }
 
 # Boxes with their own home lack the real home's keys, projects and this repo.
 # Link them in, but never replace anything that is already there.
 link_box_home_paths() {
-    local name target link
-    for name in .ssh Dev dotfiles; do
-        link="$HOME/$name"
-        if [ "$name" = dotfiles ]; then
-            target="$(pwd -P)"
-        else
-            target="$DISTROBOX_HOST_HOME/$name"
-        fi
-        path_exists "$link" && continue
-        if [ ! -e "$target" ]; then
-            warn "$target does not exist; not linking $link."
-            continue
-        fi
-        info "Linking $link to $target"
-        ln -s "$target" "$link" || warn "Could not link $link to $target."
-    done
+  local name target link
+  for name in .ssh Dev dotfiles; do
+    link="$HOME/$name"
+    if [ "$name" = dotfiles ]; then
+      target="$(pwd -P)"
+    else
+      target="$DISTROBOX_HOST_HOME/$name"
+    fi
+    path_exists "$link" && continue
+    if [ ! -e "$target" ]; then
+      warn "$target does not exist; not linking $link."
+      continue
+    fi
+    info "Linking $link to $target"
+    ln -s "$target" "$link" || warn "Could not link $link to $target."
+  done
 }
 
 # Put a launcher for this box's nvim in the real ~/.local/bin, so `nvim` (and
@@ -465,315 +473,328 @@ link_box_home_paths() {
 # file or this box's own launcher. Never export a launcher itself: it would
 # exec itself forever.
 export_nvim_to_host() {
-    local dest_dir="$HOME/.local/bin" dest src candidate
-    dest="$dest_dir/nvim"
-    if ! command -v distrobox-export >/dev/null 2>&1; then
-        warn "distrobox-export not found; nvim is not exported to the host."
-        return 0
-    fi
-    if [ -L "$dest" ] ||
-       { path_exists "$dest" &&
-         ! { grep -Fqx '# distrobox_binary' "$dest" 2>/dev/null &&
-             grep -Fqx "# name: ${CONTAINER_ID:-}" "$dest" 2>/dev/null; }; }; then
-        warn "$dest exists and is not this box's nvim launcher; not exporting nvim." \
-             "Move it aside and re-run to export."
-        return 0
-    fi
+  local dest_dir="$HOME/.local/bin" dest src candidate
+  dest="$dest_dir/nvim"
+  if ! command -v distrobox-export >/dev/null 2>&1; then
+    warn "distrobox-export not found; nvim is not exported to the host."
+    return 0
+  fi
+  if [ -L "$dest" ] ||
+    { path_exists "$dest" &&
+      ! { grep -Fqx '# distrobox_binary' "$dest" 2>/dev/null &&
+        grep -Fqx "# name: ${CONTAINER_ID:-}" "$dest" 2>/dev/null; }; }; then
+    warn "$dest exists and is not this box's nvim launcher; not exporting nvim." \
+      "Move it aside and re-run to export."
+    return 0
+  fi
 
-    src=""
-    while IFS= read -r candidate; do
-        [ "$candidate" = "$dest" ] && continue
-        grep -q distrobox_binary "$candidate" 2>/dev/null && continue
-        src="$candidate"
-        break
-    done < <(type -ap nvim)
-    if [ -z "$src" ]; then
-        warn "No nvim binary found in this box; not exporting nvim."
-        return 0
-    fi
+  src=""
+  while IFS= read -r candidate; do
+    [ "$candidate" = "$dest" ] && continue
+    grep -q distrobox_binary "$candidate" 2>/dev/null && continue
+    src="$candidate"
+    break
+  done < <(type -ap nvim)
+  if [ -z "$src" ]; then
+    warn "No nvim binary found in this box; not exporting nvim."
+    return 0
+  fi
 
-    info "Exporting $src to the host"
-    distrobox-export --bin "$src" --export-path "$dest_dir" >/dev/null ||
-        warn "distrobox-export failed; nvim is not available from the host."
+  info "Exporting $src to the host"
+  distrobox-export --bin "$src" --export-path "$dest_dir" >/dev/null ||
+    warn "distrobox-export failed; nvim is not available from the host."
 }
 
 # Make zsh the login shell on Linux, matching macOS (where it is the default).
 # sudo chsh avoids the password prompt (sudo is already primed from the
 # package install) and behaves the same on every supported distro.
 set_default_shell_zsh() {
-    # USER is unset in some containers.
-    local zsh current user="${USER:-$(id -un)}"
-    zsh="$(command -v zsh)" || { warn "zsh not found; leaving login shell unchanged."; return 0; }
+  # USER is unset in some containers.
+  local zsh current user="${USER:-$(id -un)}"
+  zsh="$(command -v zsh)" || {
+    warn "zsh not found; leaving login shell unchanged."
+    return 0
+  }
 
-    current="$(getent passwd "$user" | cut -d: -f7)" || current=""
-    [ "$current" = "$zsh" ] && return 0
+  current="$(getent passwd "$user" | cut -d: -f7)" || current=""
+  [ "$current" = "$zsh" ] && return 0
 
-    grep -qx "$zsh" /etc/shells 2>/dev/null ||
-        warn "$zsh is not listed in /etc/shells; chsh may refuse it."
+  grep -qx "$zsh" /etc/shells 2>/dev/null ||
+    warn "$zsh is not listed in /etc/shells; chsh may refuse it."
 
-    info "Changing login shell to $zsh (was ${current:-unknown})"
-    if ! sudo chsh -s "$zsh" "$user"; then
-        warn "Could not change the login shell (directory account?)." \
-             "Run manually: sudo usermod -s $zsh $user"
-    fi
+  info "Changing login shell to $zsh (was ${current:-unknown})"
+  if ! sudo chsh -s "$zsh" "$user"; then
+    warn "Could not change the login shell (directory account?)." \
+      "Run manually: sudo usermod -s $zsh $user"
+  fi
 }
 
 # Platform-specific git settings live in ~/.gitconfig.local (included from
 # .gitconfig) so the shared config stays portable across macOS and Linux.
 setup_git_credential_helper() {
-    local localconfig="$HOME/.gitconfig.local"
+  local localconfig="$HOME/.gitconfig.local"
 
-    if git config --file "$localconfig" --get credential.helper >/dev/null 2>&1; then
-        info "Credential helper already configured in $localconfig"
-        return
-    fi
+  if git config --file "$localconfig" --get credential.helper >/dev/null 2>&1; then
+    info "Credential helper already configured in $localconfig"
+    return
+  fi
 
-    local helper
-    if [ "$OS" = "Darwin" ]; then
-        helper=osxkeychain
-    # Distros install git's helpers into its exec-path (e.g. /usr/libexec/git-core),
-    # which is usually not on PATH.
-    elif command -v git-credential-libsecret >/dev/null 2>&1 ||
-         [ -x "$(git --exec-path)/git-credential-libsecret" ]; then
-        helper=libsecret
-    else
-        helper=cache
-    fi
+  local helper
+  if [ "$OS" = "Darwin" ]; then
+    helper=osxkeychain
+  # Distros install git's helpers into its exec-path (e.g. /usr/libexec/git-core),
+  # which is usually not on PATH.
+  elif command -v git-credential-libsecret >/dev/null 2>&1 ||
+    [ -x "$(git --exec-path)/git-credential-libsecret" ]; then
+    helper=libsecret
+  else
+    helper=cache
+  fi
 
-    info "Setting git credential.helper=$helper in $localconfig"
-    git config --file "$localconfig" credential.helper "$helper"
+  info "Setting git credential.helper=$helper in $localconfig"
+  git config --file "$localconfig" credential.helper "$helper"
 }
 
 path_exists() {
-    [ -e "$1" ] || [ -L "$1" ]
+  [ -e "$1" ] || [ -L "$1" ]
 }
 
 # mv -n may report success even when it skips a move. Check the paths instead.
 move_without_clobbering() {
-    mv -n "$1" "$2" || :
-    ! path_exists "$1" && path_exists "$2"
+  mv -n "$1" "$2" || :
+  ! path_exists "$1" && path_exists "$2"
 }
 
 # Arguments are original/backup pairs, restored in reverse order.
 restore_backups() {
-    local paths=("$@") i target bak
-    for ((i=$#-2; i>=0; i-=2)); do
-        target="${paths[$i]}"
-        bak="${paths[$((i+1))]}"
-        if ! path_exists "$target" && move_without_clobbering "$bak" "$target"; then
-            info "Restored $target from $bak"
-        else
-            warn "Backup retained at $bak; could not restore $target."
-            if [ -L "$target" ]; then
-                warn "Review and remove the symlink at $target before restoring $bak."
-            fi
-        fi
-    done
+  local paths=("$@") i target bak
+  for ((i = $# - 2; i >= 0; i -= 2)); do
+    target="${paths[$i]}"
+    bak="${paths[$((i + 1))]}"
+    if ! path_exists "$target" && move_without_clobbering "$bak" "$target"; then
+      info "Restored $target from $bak"
+    else
+      warn "Backup retained at $bak; could not restore $target."
+      if [ -L "$target" ]; then
+        warn "Review and remove the symlink at $target before restoring $bak."
+      fi
+    fi
+  done
 }
 
 stow_packages() {
+  ZSHRC_BACKUP=""
+  ZPROFILE_BACKUP=""
+  info "Stowing: ${STOW_PACKAGES[*]}"
+
+  if stow --target="$HOME" --simulate --restow "${STOW_PACKAGES[@]}" 2>/dev/null; then
+    stow --target="$HOME" --restow "${STOW_PACKAGES[@]}" || return 1
+    return
+  fi
+
+  # Stow refused because something real sits where a symlink belongs.
+  # Only back up a conflicting file when it is clearly not ours: a regular
+  # file, not the same inode as the repo's copy, and sitting at its literal
+  # physical path (not reached through a symlinked parent, which could be
+  # this repo's own files). Anything ambiguous is left for stow to report
+  # as a conflict rather than moved. Files that stow's default ignore list
+  # never links are skipped too: moving them would leave nothing behind.
+  local pkg file target bak base suffix backup_count=0 backup_failed=false
+  local backups=()
+  for pkg in "${STOW_PACKAGES[@]}"; do
+    while IFS= read -r file; do
+      case "${file##*/}" in
+      .gitignore | .gitmodules | .cvsignore | *~ | \#*\# | .\#*) continue ;;
+      esac
+      case "$file" in
+      "$pkg"/README.* | "$pkg"/LICENSE.* | "$pkg"/COPYING) continue ;;
+      esac
+      target="$HOME/${file#"$pkg"/}"
+      if [ -f "$target" ] && [ ! -L "$target" ] &&
+        ! [ "$target" -ef "$file" ] &&
+        [ "$(realpath "$target")" = "$target" ]; then
+        bak="$target.bak"
+        if path_exists "$bak"; then
+          base="$target.bak.$(date +%Y%m%d%H%M%S)"
+          bak="$base"
+          suffix=0
+          while path_exists "$bak"; do
+            suffix=$((suffix + 1))
+            bak="$base.$suffix"
+          done
+        fi
+        warn "Backing up existing $target to $bak"
+        if ! move_without_clobbering "$target" "$bak"; then
+          warn "Could not back up $target to $bak; stopping installation."
+          backup_failed=true
+          break
+        fi
+        backups[backup_count]="$target"
+        backups[backup_count + 1]="$bak"
+        backup_count=$((backup_count + 2))
+        case "$target" in
+        "$HOME/.zshrc") ZSHRC_BACKUP="$bak" ;;
+        "$HOME/.zprofile") ZPROFILE_BACKUP="$bak" ;;
+        esac
+      fi
+    done < <(cd "$pkg" && find . -type f | sed "s|^\./|$pkg/|")
+    if "$backup_failed"; then break; fi
+  done
+
+  if "$backup_failed" ||
+    ! stow --target="$HOME" --simulate --restow "${STOW_PACKAGES[@]}" ||
+    ! stow --target="$HOME" --restow "${STOW_PACKAGES[@]}"; then
+    if [ "$backup_count" -gt 0 ]; then restore_backups "${backups[@]}"; fi
     ZSHRC_BACKUP=""
     ZPROFILE_BACKUP=""
-    info "Stowing: ${STOW_PACKAGES[*]}"
-
-    if stow --target="$HOME" --simulate --restow "${STOW_PACKAGES[@]}" 2>/dev/null; then
-        stow --target="$HOME" --restow "${STOW_PACKAGES[@]}" || return 1
-        return
-    fi
-
-    # Stow refused because something real sits where a symlink belongs.
-    # Only back up a conflicting file when it is clearly not ours: a regular
-    # file, not the same inode as the repo's copy, and sitting at its literal
-    # physical path (not reached through a symlinked parent, which could be
-    # this repo's own files). Anything ambiguous is left for stow to report
-    # as a conflict rather than moved. Files that stow's default ignore list
-    # never links are skipped too: moving them would leave nothing behind.
-    local pkg file target bak base suffix backup_count=0 backup_failed=false
-    local backups=()
-    for pkg in "${STOW_PACKAGES[@]}"; do
-        while IFS= read -r file; do
-            case "${file##*/}" in
-                .gitignore|.gitmodules|.cvsignore|*~|\#*\#|.\#*) continue ;;
-            esac
-            case "$file" in
-                "$pkg"/README.*|"$pkg"/LICENSE.*|"$pkg"/COPYING) continue ;;
-            esac
-            target="$HOME/${file#"$pkg"/}"
-            if [ -f "$target" ] && [ ! -L "$target" ] &&
-               ! [ "$target" -ef "$file" ] &&
-               [ "$(realpath "$target")" = "$target" ]; then
-                bak="$target.bak"
-                if path_exists "$bak"; then
-                    base="$target.bak.$(date +%Y%m%d%H%M%S)"
-                    bak="$base"
-                    suffix=0
-                    while path_exists "$bak"; do
-                        suffix=$((suffix+1))
-                        bak="$base.$suffix"
-                    done
-                fi
-                warn "Backing up existing $target to $bak"
-                if ! move_without_clobbering "$target" "$bak"; then
-                    warn "Could not back up $target to $bak; stopping installation."
-                    backup_failed=true
-                    break
-                fi
-                backups[backup_count]="$target"
-                backups[backup_count+1]="$bak"
-                backup_count=$((backup_count+2))
-                case "$target" in
-                    "$HOME/.zshrc")    ZSHRC_BACKUP="$bak" ;;
-                    "$HOME/.zprofile") ZPROFILE_BACKUP="$bak" ;;
-                esac
-            fi
-        done < <(cd "$pkg" && find . -type f | sed "s|^\./|$pkg/|")
-        if "$backup_failed"; then break; fi
-    done
-
-    if "$backup_failed" ||
-       ! stow --target="$HOME" --simulate --restow "${STOW_PACKAGES[@]}" ||
-       ! stow --target="$HOME" --restow "${STOW_PACKAGES[@]}"; then
-        if [ "$backup_count" -gt 0 ]; then restore_backups "${backups[@]}"; fi
-        ZSHRC_BACKUP=""
-        ZPROFILE_BACKUP=""
-        return 1
-    fi
+    return 1
+  fi
 }
 
 # If a shell rc (.zshrc, .zprofile) got backed up, keep whatever personal
 # config was in it easy to recover: copy it into the matching .local file with
 # every line commented out. Never overwrites an existing .local file.
 seed_local_from_backup() {
-    local bak="$1" localfile="$2"
-    [ -f "$bak" ] || return 0
-    path_exists "$localfile" && return 0
+  local bak="$1" localfile="$2"
+  [ -f "$bak" ] || return 0
+  path_exists "$localfile" && return 0
 
-    info "Seeding $localfile from $bak (review it and uncomment what you want to keep)"
-    (
-        umask 077
-        set -C
-        if ! exec 3>"$localfile"; then
-            warn "Could not exclusively create $localfile; leaving it untouched."
-            exit 1
-        fi
-        if {
-            printf '# Seeded by install.sh from %s.\n' "$bak" &&
-            printf '# Uncomment anything you want to keep; the repo zsh config already\n' &&
-            printf '# covers the basics (prompt, completion, history, cargo, ...).\n\n' &&
-            sed 's/^/# /' "$bak"
-        } >&3; then
-            exec 3>&-
-        else
-            exec 3>&-
-            rm -f "$localfile"
-            warn "Failed to seed $localfile from $bak."
-            exit 1
-        fi
-    )
+  info "Seeding $localfile from $bak (review it and uncomment what you want to keep)"
+  (
+    umask 077
+    set -C
+    if ! exec 3>"$localfile"; then
+      warn "Could not exclusively create $localfile; leaving it untouched."
+      exit 1
+    fi
+    if {
+      printf '# Seeded by install.sh from %s.\n' "$bak" &&
+        printf '# Uncomment anything you want to keep; the repo zsh config already\n' &&
+        printf '# covers the basics (prompt, completion, history, cargo, ...).\n\n' &&
+        sed 's/^/# /' "$bak"
+    } >&3; then
+      exec 3>&-
+    else
+      exec 3>&-
+      rm -f "$localfile"
+      warn "Failed to seed $localfile from $bak."
+      exit 1
+    fi
+  )
 }
 
 # Run inside a disposable repository, so project-local config cannot affect
 # validation of the newly installed global config and its local overrides.
 probe_git_signing() {
-    local repo="$1" enabled format version tree status
-    if enabled="$(git -C "$repo" config --bool --get commit.gpgsign)"; then
-        if [ "$enabled" = false ]; then
-            info "Git signing explicitly disabled; skipping signing check."
-            return 0
-        fi
+  local repo="$1" enabled format version tree status
+  if enabled="$(git -C "$repo" config --bool --get commit.gpgsign)"; then
+    if [ "$enabled" = false ]; then
+      info "Git signing explicitly disabled; skipping signing check."
+      return 0
+    fi
+  else
+    status=$?
+    [ "$status" -eq 1 ] || return "$status"
+  fi
+  if format="$(git -C "$repo" config --get gpg.format)"; then
+    :
+  else
+    status=$?
+    [ "$status" -eq 1 ] || return "$status"
+    format=openpgp
+  fi
+  if [ "$format" = ssh ]; then
+    version="$(git --version)" || return 1
+    if [[ "$version" =~ ^git\ version\ ([0-9]+)\.([0-9]+) ]]; then
+      if [ "${BASH_REMATCH[1]}" -lt 2 ] ||
+        { [ "${BASH_REMATCH[1]}" -eq 2 ] && [ "${BASH_REMATCH[2]}" -lt 34 ]; }; then
+        warn "SSH signing requires Git 2.34 or newer; found $version. Upgrade Git and re-run."
+        return 1
+      fi
     else
-        status=$?
-        [ "$status" -eq 1 ] || return "$status"
+      warn "Could not determine SSH signing support from: $version"
+      return 1
     fi
-    if format="$(git -C "$repo" config --get gpg.format)"; then
-        :
-    else
-        status=$?
-        [ "$status" -eq 1 ] || return "$status"
-        format=openpgp
-    fi
-    if [ "$format" = ssh ]; then
-        version="$(git --version)" || return 1
-        if [[ "$version" =~ ^git\ version\ ([0-9]+)\.([0-9]+) ]]; then
-            if [ "${BASH_REMATCH[1]}" -lt 2 ] ||
-               { [ "${BASH_REMATCH[1]}" -eq 2 ] && [ "${BASH_REMATCH[2]}" -lt 34 ]; }; then
-                warn "SSH signing requires Git 2.34 or newer; found $version. Upgrade Git and re-run."
-                return 1
-            fi
-        else
-            warn "Could not determine SSH signing support from: $version"
-            return 1
-        fi
-    fi
+  fi
 
-    info "Checking Git signing; a passphrase, security-key touch, or agent approval may be requested."
-    tree="$(git -C "$repo" hash-object -t tree -w --stdin </dev/null)" || return 1
-    git -C "$repo" commit-tree -S "$tree" -m 'Dotfiles signing check' >/dev/null
+  info "Checking Git signing; a passphrase, security-key touch, or agent approval may be requested."
+  tree="$(git -C "$repo" hash-object -t tree -w --stdin </dev/null)" || return 1
+  git -C "$repo" commit-tree -S "$tree" -m 'Dotfiles signing check' >/dev/null
 }
 
 validate_git_signing() {
-    local tmp status=0
-    if ! tmp="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-signing.XXXXXX")"; then
-        warn "configs installed; signing setup incomplete: could not create a temporary signing repository."
-        return 1
-    fi
-    if git init --bare --quiet --template= "$tmp" && probe_git_signing "$tmp"; then
-        :
-    else
-        warn "configs installed; signing setup incomplete. See the diagnostic above."
-        warn "Check user.signingkey and gpg.format in ~/.gitconfig.local. For SSH signing," \
-             "make the configured public key available and load its private key into your SSH agent, then re-run."
-        status=1
-    fi
-    if ! rm -rf "$tmp"; then
-        warn "Could not remove temporary signing repository $tmp."
-        status=1
-    fi
-    return "$status"
+  local tmp status=0
+  if ! tmp="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-signing.XXXXXX")"; then
+    warn "configs installed; signing setup incomplete: could not create a temporary signing repository."
+    return 1
+  fi
+  if git init --bare --quiet --template= "$tmp" && probe_git_signing "$tmp"; then
+    :
+  else
+    warn "configs installed; signing setup incomplete. See the diagnostic above."
+    warn "Check user.signingkey and gpg.format in ~/.gitconfig.local. For SSH signing," \
+      "make the configured public key available and load its private key into your SSH agent, then re-run."
+    status=1
+  fi
+  if ! rm -rf "$tmp"; then
+    warn "Could not remove temporary signing repository $tmp."
+    status=1
+  fi
+  return "$status"
 }
 
 main() {
-    set -euo pipefail
-    cd "$(dirname "${BASH_SOURCE[0]}")"
-    OS="$(uname -s)"
-    STOW_PACKAGES=(gitconfig gitignore nvim shell starship)
-    DELTA_VERSION=0.19.2
-    TREESITTER_MIN_VERSION=0.26.1
-    ZSHRC_BACKUP=""
-    ZPROFILE_BACKUP=""
-    ENVIRONMENT=normal
+  set -euo pipefail
+  cd "$(dirname "${BASH_SOURCE[0]}")"
+  OS="$(uname -s)"
+  STOW_PACKAGES=(gitconfig gitignore nvim shell starship)
+  DELTA_VERSION=0.19.2
+  TREESITTER_MIN_VERSION=0.26.1
+  ZSHRC_BACKUP=""
+  ZPROFILE_BACKUP=""
+  ENVIRONMENT=normal
 
-    case "$OS" in
-        Darwin) install_macos ;;
-        Linux)  ENVIRONMENT="$(detect_environment)"
-                case "$ENVIRONMENT" in
-                    ostree-host)   setup_ostree_host; return 0 ;;
-                    distrobox-own) link_box_home_paths ;;
-                esac
-                install_linux
-                install_neovim_fallback
-                install_delta_fallback
-                # The font belongs to the host, not to a distrobox.
-                if [ "$ENVIRONMENT" = normal ]; then
-                    install_nerd_font_linux
-                fi
-                set_default_shell_zsh ;;
-        *)      die "Unsupported OS: $OS" ;;
+  case "$OS" in
+  Darwin) install_macos ;;
+  Linux)
+    ENVIRONMENT="$(detect_environment)"
+    case "$ENVIRONMENT" in
+    ostree-host)
+      setup_ostree_host
+      return 0
+      ;;
+    distrobox-own) link_box_home_paths ;;
     esac
-
-    setup_git_credential_helper
-    stow_packages || return 1
-    seed_local_from_backup "$ZSHRC_BACKUP" "$HOME/.zshrc.local" || return 1
-    seed_local_from_backup "$ZPROFILE_BACKUP" "$HOME/.zprofile.local" || return 1
-    # Only the shared-home box exports: the export path is $HOME/.local/bin,
-    # which is the real ~/.local/bin only there (dev's would land in ~/distrobox/dev).
-    if [ "$ENVIRONMENT" = distrobox-shared ]; then
-        export_nvim_to_host
+    install_linux
+    install_neovim_fallback
+    install_delta_fallback
+    # The font belongs to the host, not to a distrobox.
+    if [ "$ENVIRONMENT" = normal ]; then
+      install_nerd_font_linux
     fi
-    validate_git_signing || return 1
-    info "Done."
+    # Dux runs on the real desktop, so stow it wherever the real home is.
+    if [ "$ENVIRONMENT" = normal ] || [ "$ENVIRONMENT" = distrobox-shared ]; then
+      mkdir -p "$HOME/.config/dms"
+      STOW_PACKAGES+=(dux)
+    fi
+    set_default_shell_zsh
+    ;;
+  *) die "Unsupported OS: $OS" ;;
+  esac
+
+  setup_git_credential_helper
+  stow_packages || return 1
+  seed_local_from_backup "$ZSHRC_BACKUP" "$HOME/.zshrc.local" || return 1
+  seed_local_from_backup "$ZPROFILE_BACKUP" "$HOME/.zprofile.local" || return 1
+  # Only the shared-home box exports: the export path is $HOME/.local/bin,
+  # which is the real ~/.local/bin only there (dev's would land in ~/distrobox/dev).
+  if [ "$ENVIRONMENT" = distrobox-shared ]; then
+    export_nvim_to_host
+  fi
+  validate_git_signing || return 1
+  info "Done."
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    main "$@"
+  main "$@"
 fi
